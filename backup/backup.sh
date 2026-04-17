@@ -60,6 +60,14 @@ for CONF in $(ssh "$ROUTER" 'ls /etc/travel-wifi/*.conf 2>/dev/null' || true); d
     ssh "$ROUTER" "cat $CONF 2>/dev/null" > "$SNAP/travel-wifi/$NAME" || true
 done
 
+# === 5b. ksmbd (SMB share) — пароли, hotplug handler ===
+echo "→ ksmbd (SMB share)"
+mkdir -p "$SNAP/ksmbd"
+ssh "$ROUTER" 'tar -cf - -C /etc ksmbd 2>/dev/null' 2>/dev/null | tar -xf - -C "$SNAP/" 2>/dev/null || true
+mkdir -p "$SNAP/hotplug.d/block"
+ssh "$ROUTER" 'cat /etc/hotplug.d/block/10-usb-storage-mount 2>/dev/null' > "$SNAP/hotplug.d/block/10-usb-storage-mount" || true
+ssh "$ROUTER" 'cat /root/family-smb.txt 2>/dev/null' > "$SNAP/family-smb.txt" 2>/dev/null || true
+
 # === 6. Crontab ===
 echo "→ crontab"
 ssh "$ROUTER" 'crontab -l 2>/dev/null' > "$SNAP/crontab.txt" || true

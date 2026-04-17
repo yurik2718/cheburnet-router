@@ -66,6 +66,15 @@ fi
 # === 6. sqm-scripts ===
 apk add --no-interactive sqm-scripts 2>&1 | tail -2 || true
 
+# === 6a. NAS (ksmbd + USB-storage + filesystems) ===
+echo "→ ksmbd + USB-storage kmods"
+apk add --no-interactive \
+    kmod-usb-storage kmod-scsi-core block-mount \
+    kmod-fs-ntfs3 kmod-fs-ext4 kmod-fs-vfat kmod-fs-exfat \
+    ksmbd-server kmod-fs-ksmbd luci-app-ksmbd e2fsprogs 2>&1 | tail -3 || true
+/etc/init.d/ksmbd enable 2>/dev/null || true
+/etc/init.d/ksmbd restart >/dev/null 2>&1 || true
+
 # === 7. Enable нашего init.d сервиса ===
 /etc/init.d/vpn-mode enable 2>/dev/null || true
 

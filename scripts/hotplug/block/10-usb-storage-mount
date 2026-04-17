@@ -1,0 +1,48 @@
+#!/bin/sh
+# Auto-mount USB-block (partition) devices to /mnt/storage
+# Supports ext4/ext3/ext2/ntfs/vfat/exfat.
+#
+# Поведение:
+# - Монтирует ПЕРВУЮ найденную USB-партицию к /mnt/storage
+# - Если что-то уже замонтировано в /mnt/storage, новое подключение игнорируется
+# - При отключении — unmount и release
+
+MOUNT=/mnt/storage
+
+[ "$DEVTYPE" = "partition" ] || exit 0
+
+# Проверка что это USB-устройство (а не внутренний flash)
+readlink -f "/sys/class/block/$DEVNAME" 2>/dev/null | grep -q usb || exit 0
+
+case "$ACTION" in
+    add)
+        # Уже что-то примонтировано — не трогаем
+        mountpoint -q "$MOUNT" && exit 0
+        mkdir -p "$MOUNT"
+        FS=$(blkid -o value -s TYPE "/dev/$DEVNAME" 2>/dev/null)
+        case "$FS" in
+            ntfs|ntfs3)
+                mount -t ntfs3 "/dev/$DEVNAME" "$MOUNT" -o uid=0,gid=0,umask=022 2>&1 | logger -t usb-mount
+                ;;
+            vfat|exfat|fat32)
+                mount -t "$FS" "/dev/$DEVNAME" "$MOUNT" -o uid=0,gid=0,umask=022 2>&1 | logger -t usb-mount
+                ;;
+            ext4|ext3|ext2)
+                mount -t "$FS" "/dev/$DEVNAME" "$MOUNT" 2>&1 | logger -t usb-mount
+                ;;
+            *)
+                logger -t usb-mount "unknown filesystem '$FS' on /dev/$DEVNAME — trying auto"
+                mount "/dev/$DEVNAME" "$MOUNT" 2>&1 | logger -t usb-mount
+                ;;
+        esac
+        if mountpoint -q "$MOUNT"; then
+            logger -t usb-mount "mounted /dev/$DEVNAME ($FS) → $MOUNT"
+        fi
+        ;;
+    remove)
+        if mountpoint -q "$MOUNT"; then
+            umount "$MOUNT" 2>&1 | logger -t usb-mount
+            logger -t usb-mount "unmounted $MOUNT"
+        fi
+        ;;
+esac
