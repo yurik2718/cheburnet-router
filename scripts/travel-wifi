@@ -1,0 +1,101 @@
+#!/bin/sh
+# travel-wifi — менеджер сохранённых Wi-Fi профилей для travel-connect.
+# Пример workflow: один раз подключились в отеле через `travel-connect`,
+# сразу сохранили: `travel-wifi save marriott-lv "MarriottGuest" "pass"`.
+# В следующий раз в этом отеле: `travel-wifi connect marriott-lv`.
+#
+# Профили хранятся в /etc/travel-wifi/<name>.conf (простые shell-файлы,
+# сохраняются при sysupgrade если в /etc/).
+
+PROFILE_DIR=/etc/travel-wifi
+mkdir -p "$PROFILE_DIR"
+
+usage() {
+    cat <<EOF
+travel-wifi — менеджер Wi-Fi профилей
+
+Usage:
+  $0 save <name> <SSID> [password]   сохранить профиль
+  $0 list                            список сохранённых
+  $0 connect <name>                  подключиться к сохранённому
+  $0 delete <name>                   удалить профиль
+  $0 show <name>                     показать содержимое (пароль в открытом виде!)
+
+Примеры:
+  $0 save marriott-lv "MarriottGuest" "welcome2024"
+  $0 save cafe-nearby "CafeWiFi"                    # без пароля
+  $0 list
+  $0 connect marriott-lv
+
+Хранится в $PROFILE_DIR/<name>.conf
+EOF
+}
+
+case "$1" in
+    save)
+        NAME="$2"
+        SSID="$3"
+        PSK="$4"
+        [ -z "$NAME" ] || [ -z "$SSID" ] && { echo "Usage: $0 save <name> <SSID> [password]"; exit 1; }
+        # Валидация имени (только [a-z0-9_-])
+        case "$NAME" in
+            *[!a-zA-Z0-9_-]*) echo "ERROR: name может содержать только a-z, 0-9, _, -"; exit 1 ;;
+        esac
+        FILE="$PROFILE_DIR/${NAME}.conf"
+        {
+            echo "# Wi-Fi профиль '$NAME' — создан $(date '+%Y-%m-%d %H:%M')"
+            echo "SSID=\"$SSID\""
+            [ -n "$PSK" ] && echo "PSK=\"$PSK\""
+            [ -z "$PSK" ] && echo "# PSK не задан (открытая сеть)"
+        } > "$FILE"
+        chmod 600 "$FILE"
+        echo "✓ сохранено: $FILE"
+        ;;
+
+    list|ls)
+        if [ ! "$(ls -A $PROFILE_DIR 2>/dev/null)" ]; then
+            echo "Сохранённых профилей нет."
+            echo "Добавьте: $0 save <name> <SSID> [password]"
+            exit 0
+        fi
+        echo "Сохранённые Wi-Fi профили:"
+        for F in "$PROFILE_DIR"/*.conf; do
+            [ -f "$F" ] || continue
+            NAME=$(basename "$F" .conf)
+            SSID=$(grep '^SSID=' "$F" | cut -d'"' -f2)
+            HAS_PSK=$(grep -c '^PSK=' "$F" 2>/dev/null || echo 0)
+            [ "$HAS_PSK" -eq 0 ] && LOCK="открытая" || LOCK="WPA"
+            printf "  %-20s → %-25s (%s)\n" "$NAME" "$SSID" "$LOCK"
+        done
+        ;;
+
+    connect|c)
+        NAME="$2"
+        [ -z "$NAME" ] && { echo "Usage: $0 connect <name>"; exit 1; }
+        FILE="$PROFILE_DIR/${NAME}.conf"
+        [ ! -f "$FILE" ] && { echo "ERROR: профиль '$NAME' не найден. Список: $0 list"; exit 1; }
+        # shellcheck disable=SC1090
+        . "$FILE"
+        echo "→ подключаюсь через профиль '$NAME' → SSID='$SSID'"
+        exec /usr/bin/travel-connect "$SSID" "$PSK"
+        ;;
+
+    delete|rm|del)
+        NAME="$2"
+        [ -z "$NAME" ] && { echo "Usage: $0 delete <name>"; exit 1; }
+        FILE="$PROFILE_DIR/${NAME}.conf"
+        [ ! -f "$FILE" ] && { echo "профиль '$NAME' не существует"; exit 1; }
+        rm "$FILE"
+        echo "✓ удалён профиль '$NAME'"
+        ;;
+
+    show)
+        NAME="$2"
+        [ -z "$NAME" ] && { echo "Usage: $0 show <name>"; exit 1; }
+        FILE="$PROFILE_DIR/${NAME}.conf"
+        [ ! -f "$FILE" ] && { echo "профиль '$NAME' не существует"; exit 1; }
+        cat "$FILE"
+        ;;
+
+    *) usage ;;
+esac

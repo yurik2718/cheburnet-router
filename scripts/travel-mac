@@ -1,0 +1,77 @@
+#!/bin/sh
+# travel-mac — MAC-адрес роутера для WAN.
+# Для обхода отельных лимитов «1 устройство на комнату» (которые считают по MAC)
+# и просто для privacy (не палить тот же MAC во всех отелях мира).
+#
+# Usage:
+#   travel-mac random       # новый случайный MAC (сохранится в UCI)
+#   travel-mac fixed <mac>  # установить конкретный MAC
+#   travel-mac reset        # убрать override (вернуть заводской)
+#   travel-mac status       # показать текущий
+
+ETH_IFACE=eth0
+
+random_mac() {
+    # Формат: 02:xx:xx:xx:xx:xx — locally-administered unicast
+    # (старший бит byte0 = 0 означает unicast; второй бит = 1 означает locally-admin)
+    hexdump -n 5 -e '5/1 "%02x" "\n"' /dev/urandom 2>/dev/null | \
+        awk '{print "02:" toupper(substr($0,1,2)) ":" toupper(substr($0,3,2)) ":" toupper(substr($0,5,2)) ":" toupper(substr($0,7,2)) ":" toupper(substr($0,9,2))}'
+}
+
+current_wan_mac() {
+    cat /sys/class/net/$ETH_IFACE/address 2>/dev/null
+}
+
+case "$1" in
+    random|r)
+        NEW_MAC=$(random_mac)
+        uci set network.wan.macaddr="$NEW_MAC"
+        uci commit network
+        ifdown wan 2>/dev/null; sleep 1; ifup wan
+        sleep 3
+        echo "✓ WAN MAC: $(current_wan_mac) (сохранён: $NEW_MAC)"
+        logger -t travel-mac "Randomized WAN MAC to $NEW_MAC"
+        ;;
+
+    fixed)
+        NEW_MAC="$2"
+        # Валидация формата
+        case "$NEW_MAC" in
+            [0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]) ;;
+            *) echo "ERROR: ожидается MAC в формате XX:XX:XX:XX:XX:XX" >&2; exit 1 ;;
+        esac
+        uci set network.wan.macaddr="$NEW_MAC"
+        uci commit network
+        ifdown wan 2>/dev/null; sleep 1; ifup wan
+        sleep 3
+        echo "✓ WAN MAC: $(current_wan_mac) (сохранён: $NEW_MAC)"
+        logger -t travel-mac "Set fixed WAN MAC to $NEW_MAC"
+        ;;
+
+    reset|default|factory)
+        uci -q delete network.wan.macaddr
+        uci commit network
+        ifdown wan 2>/dev/null; sleep 1; ifup wan
+        sleep 3
+        echo "✓ WAN MAC вернулся к заводскому: $(current_wan_mac)"
+        logger -t travel-mac "Reset to factory MAC"
+        ;;
+
+    status|""|-h|--help)
+        CURRENT=$(current_wan_mac)
+        UCI_MAC=$(uci -q get network.wan.macaddr)
+        echo "Текущий WAN MAC ($ETH_IFACE): $CURRENT"
+        if [ -n "$UCI_MAC" ]; then
+            echo "UCI override: $UCI_MAC"
+        else
+            echo "UCI override: нет (используется заводской MAC)"
+        fi
+        echo
+        echo "Команды:"
+        echo "  $0 random        — новый случайный MAC"
+        echo "  $0 fixed <MAC>   — конкретный MAC"
+        echo "  $0 reset         — вернуть заводской"
+        ;;
+
+    *) echo "Unknown command. Run: $0 status"; exit 1 ;;
+esac

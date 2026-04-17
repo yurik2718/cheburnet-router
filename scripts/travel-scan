@@ -1,0 +1,61 @@
+#!/bin/sh
+# travel-scan — показать доступные Wi-Fi сети поблизости (для travel-connect).
+# Удобно перед подключением к отельному Wi-Fi чтобы увидеть правильный SSID
+# и уровень сигнала.
+#
+# Usage:
+#   travel-scan              # сканирует radio0 (2.4 GHz)
+#   travel-scan 5            # сканирует radio1 (5 GHz)
+#   travel-scan both         # оба диапазона
+
+scan_radio() {
+    local PHY="$1"
+    local IFACE=""
+    # Найти interface на этом phy
+    for I in /sys/class/ieee80211/$PHY/device/net/*; do
+        [ -d "$I" ] && IFACE=$(basename "$I") && break
+    done
+    [ -z "$IFACE" ] && { echo "  (нет интерфейсов на $PHY)"; return; }
+
+    iwinfo "$IFACE" scan 2>/dev/null | awk '
+        /^Cell/ {n=$0; sub(/^Cell [0-9]+ - /, "", n); addr=n}
+        /ESSID:/ {
+            ssid=$0; sub(/.*ESSID: /, "", ssid); gsub(/"/, "", ssid)
+        }
+        /Signal:/ {
+            sig=$0; sub(/.*Signal: /, "", sig); sub(/ dBm.*/, "", sig)
+        }
+        /Encryption:/ {
+            enc=$0; sub(/.*Encryption: /, "", enc)
+            printf "  %-30s  %4s dBm   %s\n", ssid, sig, enc
+            ssid=""; sig=""; enc=""
+        }
+    ' | sort -k2 -n -r | head -20
+}
+
+case "${1:-}" in
+    5|5g|5G) RADIOS="phy1" ;;
+    both|all) RADIOS="phy0 phy1" ;;
+    ""|2|2g|2G) RADIOS="phy0" ;;
+    -h|--help)
+        echo "Usage: $0 [2|5|both]"
+        echo "  2     — 2.4 GHz (default)"
+        echo "  5     — 5 GHz"
+        echo "  both  — оба диапазона"
+        exit 0 ;;
+esac
+
+echo "=== Wi-Fi сканирование =="
+echo "  (сортировка по уровню сигнала; лучший = первый)"
+echo
+printf "  %-30s  %-8s   %s\n" "SSID" "Signal" "Encryption"
+printf "  %-30s  %-8s   %s\n" "----" "------" "----------"
+for PHY in $RADIOS; do
+    BAND="2.4 GHz"
+    [ "$PHY" = "phy1" ] && BAND="5 GHz"
+    echo
+    echo "  --- $BAND ---"
+    scan_radio "$PHY"
+done
+echo
+echo "Дальше: travel-connect \"<SSID>\" \"[password]\""

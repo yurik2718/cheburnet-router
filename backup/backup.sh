@@ -31,7 +31,8 @@ done
 echo "→ /usr/bin custom scripts"
 mkdir -p "$SNAP/usr-bin"
 for F in vpn-mode vpn-led dns-provider dns-healthcheck awg-watchdog log-snapshot sqm-tune \
-         travel-connect travel-portal travel-vpn-on; do
+         travel-connect travel-portal travel-vpn-on \
+         travel-tether travel-scan travel-wifi travel-mac travel-check; do
     ssh "$ROUTER" "cat /usr/bin/$F 2>/dev/null" > "$SNAP/usr-bin/$F" || true
 done
 
@@ -50,6 +51,14 @@ ssh "$ROUTER" 'cat /etc/vpn-mode.state 2>/dev/null' > "$SNAP/secrets/vpn-mode.st
 echo "→ adblock-lean"
 mkdir -p "$SNAP/adblock-lean"
 ssh "$ROUTER" 'cat /etc/adblock-lean/config 2>/dev/null' > "$SNAP/adblock-lean/config" || true
+
+# === 5a. Сохранённые Wi-Fi профили (secrets!) ===
+echo "→ travel-wifi profiles"
+mkdir -p "$SNAP/travel-wifi"
+for CONF in $(ssh "$ROUTER" 'ls /etc/travel-wifi/*.conf 2>/dev/null' || true); do
+    NAME=$(basename "$CONF")
+    ssh "$ROUTER" "cat $CONF 2>/dev/null" > "$SNAP/travel-wifi/$NAME" || true
+done
 
 # === 6. Crontab ===
 echo "→ crontab"

@@ -52,6 +52,11 @@ scp -q "$REPO_ROOT/scripts/sqm-tune" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/travel-connect" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/travel-portal" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/travel-vpn-on" "$ROUTER":/tmp/scripts/
+scp -q "$REPO_ROOT/scripts/travel-tether" "$ROUTER":/tmp/scripts/
+scp -q "$REPO_ROOT/scripts/travel-scan" "$ROUTER":/tmp/scripts/
+scp -q "$REPO_ROOT/scripts/travel-wifi" "$ROUTER":/tmp/scripts/
+scp -q "$REPO_ROOT/scripts/travel-mac" "$ROUTER":/tmp/scripts/
+scp -q "$REPO_ROOT/scripts/travel-check" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/hotplug/button/10-vpn-mode" "$ROUTER":/tmp/scripts/hotplug/button/
 scp -q "$REPO_ROOT/scripts/init.d/vpn-mode" "$ROUTER":/tmp/scripts/init.d/
 scp -q "$REPO_ROOT/configs/awg0.conf" "$ROUTER":/etc/amnezia/amneziawg/awg0.conf
@@ -62,7 +67,7 @@ echo "✓ файлы скопированы"
 # === 2. Поочерёдно запускаем setup-скрипты ===
 for SCRIPT in 00-prerequisites.sh 01-amneziawg.sh 02-podkop.sh 03-adblock.sh \
               04-dns.sh 06-slider-led.sh 07-killswitch.sh 08-watchdog.sh \
-              09-ssh-hardening.sh 10-quality.sh 11-travel.sh; do
+              09-ssh-hardening.sh 10-quality.sh 11-travel.sh 12-travel-plus.sh; do
     echo
     echo "=== RUN: setup/$SCRIPT ==="
     ssh "$ROUTER" 'sh -s' < "$REPO_ROOT/setup/$SCRIPT"

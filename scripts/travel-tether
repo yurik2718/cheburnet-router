@@ -1,0 +1,164 @@
+#!/bin/sh
+# travel-tether — автоопределение и настройка USB-tethering (телефон / 4G-модем).
+#
+# Поддерживает:
+#   - Android (USB tethering / Personal Hotspot USB) через RNDIS или cdc_ether
+#   - iPhone (Personal Hotspot USB) через ipheth (нужно «доверять» компьютеру)
+#   - 4G USB-dongles: QMI (Huawei E3372, ZTE, Quectel EC25) — простые
+#   - 4G USB-dongles: MBIM (новейшие) — более новый стандарт
+#   - 3G-модемы через option/comgt — старые dongles (ограниченная поддержка)
+#
+# Usage:
+#   travel-tether on         # автодетект, поднять как WAN
+#   travel-tether off        # отключить
+#   travel-tether status     # показать состояние
+
+WAN_ZONE_IDX=$(uci show firewall 2>/dev/null | awk -F'[][]' "/@zone.*name=.wan./{print \$2; exit}")
+
+find_tether_iface() {
+    # Ищем интерфейс созданный USB-драйверами (не eth0, не br-lan, не awg0, не wlan)
+    for IF in /sys/class/net/*; do
+        NAME=$(basename "$IF")
+        case "$NAME" in
+            eth0|eth1|br-*|awg*|lo|phy*|wwan|wlan*) continue ;;
+        esac
+        # Проверяем что это USB-устройство
+        if readlink -f "$IF" 2>/dev/null | grep -q usb; then
+            echo "$NAME"
+            return 0
+        fi
+    done
+    return 1
+}
+
+detect_and_bringup_qmi() {
+    # QMI-модемы: /dev/cdc-wdm0 появится когда подключён
+    [ -c /dev/cdc-wdm0 ] || return 1
+    echo "→ обнаружен QMI-модем на /dev/cdc-wdm0"
+    uci set network.wwan_usb=interface
+    uci set network.wwan_usb.proto='qmi'
+    uci set network.wwan_usb.device='/dev/cdc-wdm0'
+    uci set network.wwan_usb.apm='0'
+    uci set network.wwan_usb.auth='none'
+    # APN — пользователь должен задать свой через uci set network.wwan_usb.apn=...
+    uci -q get network.wwan_usb.apn > /dev/null || uci set network.wwan_usb.apn='internet'
+    uci set network.wwan_usb.pdptype='ipv4'
+    return 0
+}
+
+detect_and_bringup_ether() {
+    # USB-ethernet: RNDIS/cdc_ether/ipheth создают новый eth* интерфейс
+    IF=$(find_tether_iface)
+    [ -z "$IF" ] && return 1
+    echo "→ обнаружен USB-network интерфейс: $IF"
+    uci set network.wwan_usb=interface
+    uci set network.wwan_usb.proto='dhcp'
+    uci set network.wwan_usb.device="$IF"
+    return 0
+}
+
+bringup() {
+    echo "=== включение USB-tether ==="
+    # Почистить прошлую конфигурацию
+    uci -q delete network.wwan_usb 2>/dev/null
+
+    if detect_and_bringup_qmi; then
+        :
+    elif detect_and_bringup_ether; then
+        :
+    else
+        echo "⚠ USB-устройство не обнаружено."
+        echo "  Проверьте: lsusb — устройство должно быть в списке."
+        echo "  Если это телефон: включите «USB tethering» в настройках phone."
+        echo "  Если iPhone: в появившемся окне нажмите 'Trust'."
+        echo "  dmesg может показать что происходит: dmesg | tail -20"
+        return 1
+    fi
+
+    # Добавить в firewall wan-zone
+    if [ -n "$WAN_ZONE_IDX" ] && ! uci -q get firewall.@zone[$WAN_ZONE_IDX].network | grep -qw wwan_usb; then
+        uci add_list firewall.@zone[$WAN_ZONE_IDX].network='wwan_usb'
+    fi
+
+    uci commit network firewall
+    /etc/init.d/firewall reload > /dev/null 2>&1
+    ifup wwan_usb
+    sleep 5
+
+    if ifstatus wwan_usb 2>/dev/null | grep -q '"up": true'; then
+        IP=$(ifstatus wwan_usb 2>/dev/null | awk -F'"' '/"address"/{print $4; exit}')
+        echo "✓ USB-tether поднят, IP: ${IP:-pending}"
+        logger -t travel-tether "USB-tether UP, IP=$IP"
+    else
+        echo "⚠ интерфейс создан, но не получил IP. Смотрите: logread -t netifd"
+        return 1
+    fi
+}
+
+teardown() {
+    echo "=== выключение USB-tether ==="
+    ifdown wwan_usb 2>/dev/null
+    uci -q delete network.wwan_usb
+    if [ -n "$WAN_ZONE_IDX" ]; then
+        uci -q del_list firewall.@zone[$WAN_ZONE_IDX].network='wwan_usb'
+    fi
+    uci commit network firewall
+    /etc/init.d/firewall reload > /dev/null 2>&1
+    logger -t travel-tether "USB-tether DOWN"
+    echo "✓ отключено"
+}
+
+status_cmd() {
+    echo "=== USB-tether status ==="
+    if ! uci -q get network.wwan_usb > /dev/null; then
+        echo "Состояние: OFF (интерфейс не сконфигурирован)"
+    else
+        PROTO=$(uci -q get network.wwan_usb.proto)
+        DEV=$(uci -q get network.wwan_usb.device)
+        echo "Состояние: конфигурация есть (proto=$PROTO, device=$DEV)"
+        ifstatus wwan_usb 2>/dev/null | awk '
+            /"up": true/{up=1}
+            /"address"/{getline; getline; gsub(/[",]/, ""); ip=$2}
+            END {
+                if (up) print "Link: UP, IP:", (ip ? ip : "pending")
+                else print "Link: DOWN"
+            }'
+    fi
+    echo
+    echo "USB-устройства сейчас:"
+    lsusb | grep -vE "root hub|Host Controller" || echo "  (USB-устройств нет)"
+    echo
+    echo "Сетевые интерфейсы от USB:"
+    for IF in /sys/class/net/*; do
+        NAME=$(basename "$IF")
+        if readlink -f "$IF" 2>/dev/null | grep -q usb; then
+            echo "  $NAME"
+        fi
+    done || echo "  (нет USB-network интерфейсов)"
+}
+
+case "$1" in
+    on|up|connect) bringup ;;
+    off|down|disconnect) teardown ;;
+    status|""|--status) status_cmd ;;
+    *)
+        cat <<EOF
+Usage: $0 {on|off|status}
+
+  on      — автодетект USB-устройства и поднять как WAN
+  off     — отключить
+  status  — показать состояние
+
+Поддерживаются:
+  - Android (USB tethering / Personal Hotspot)
+  - iPhone (Personal Hotspot USB — нажмите 'Trust' на телефоне)
+  - 4G USB-dongles: QMI (Huawei E3372, ZTE, Quectel), MBIM (новые)
+  - 3G-модемы (опт. через usb-serial)
+
+Для 4G-dongle с SIM может потребоваться задать APN:
+  uci set network.wwan_usb.apn='YOUR_APN'
+  uci commit network
+  ifup wwan_usb
+EOF
+        ;;
+esac

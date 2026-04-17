@@ -132,6 +132,169 @@ travel-portal --off # выключить сейчас (= travel-vpn-on)
 
 Portal-режим отличается от VPN DOWN паттерном: heartbeat вместо частого мигания. Сигнал «намеренное выключение» vs «непредвиденная ошибка». Это важно для пользователя — не надо паниковать.
 
+## USB tethering — телефон / 4G-модем как WAN
+
+Когда Wi-Fi в отеле плохой или вообще отсутствует, можно использовать **телефон как USB-модем** или **4G/LTE USB-dongle с SIM-картой**. После установки `12-travel-plus.sh`:
+
+### Поддерживаемые устройства
+
+| Тип | Протокол | Что надо на стороне устройства |
+|---|---|---|
+| **Android** | RNDIS / cdc_ether | Settings → Tethering → **USB tethering ON** |
+| **iPhone** | ipheth | Settings → Personal Hotspot → **Allow Others to Join**. При первом подключении на iPhone: **Trust This Computer**. |
+| **4G-dongle QMI** | qmi-wwan | Huawei E3372, ZTE MF79, Quectel EC25 и др. |
+| **4G-dongle MBIM** | cdc-mbim | Новейшие LTE (некоторые Quectel, Sierra) |
+| **3G-dongle PPP/AT** | usb-serial-option | Старые Huawei, ZTE (ограниченная поддержка) |
+
+### Использование
+
+```bash
+# 1. Воткните телефон/dongle в USB-порт роутера
+# 2. Проверьте что устройство видно
+ssh root@192.168.1.1 lsusb
+# Bus 001 Device 003: ID 05ac:12ab Apple, Inc. iPhone
+
+# 3. Поднять tethering
+ssh root@192.168.1.1 travel-tether on
+# → обнаружен USB-network интерфейс: usb0
+# → USB-tether поднят, IP: 172.20.10.5
+
+# 4. Проверить что интернет работает
+ssh root@192.168.1.1 curl -s https://ifconfig.co
+
+# 5. Отключить (когда не нужен)
+ssh root@192.168.1.1 travel-tether off
+```
+
+### Для 4G-dongle с SIM — настройка APN
+
+По умолчанию скрипт использует APN `internet` (подходит для большинства EU/RU операторов). Если ваш оператор требует другой APN:
+
+```bash
+# После первого `travel-tether on` (с QMI-dongle):
+uci set network.wwan_usb.apn='<your-operator-apn>'
+uci commit network
+ifup wwan_usb
+```
+
+Типичные APN:
+- МТС: `internet.mts.ru`
+- МегаФон: `internet`
+- Билайн: `internet.beeline.ru`
+- Tele2: `internet.tele2.ru`
+- EE UK: `everywhere`
+- Vodafone UK: `wap.vodafone.co.uk`
+- T-Mobile US: `fast.t-mobile.com`
+
+## Wi-Fi сканирование — `travel-scan`
+
+Перед `travel-connect` полезно увидеть доступные сети:
+
+```bash
+travel-scan              # 2.4 GHz (default)
+travel-scan 5            # 5 GHz
+travel-scan both         # оба диапазона
+```
+
+Вывод:
+```
+=== Wi-Fi сканирование ==
+  SSID                            Signal     Encryption
+  ----                            ------     ----------
+  MarriottGuest                   -45 dBm    none
+  MarriottMeeting                 -58 dBm    WPA2 PSK (CCMP)
+  LaptopHotspot                   -72 dBm    WPA2 PSK (CCMP)
+  ...
+```
+
+Сортировка по уровню сигнала — первая сеть с самым сильным сигналом.
+
+## Сохранённые Wi-Fi профили — `travel-wifi`
+
+Когда вы часто бываете в одних и тех же местах (отель сетевой, рабочий офис, дом друзей), удобно сохранять подключения:
+
+```bash
+# Первый раз — как обычно
+travel-connect "MarriottGuest" "welcome2024"
+
+# Сохранить профиль
+travel-wifi save mariott-lv "MarriottGuest" "welcome2024"
+
+# В следующий приезд — одна команда
+travel-wifi connect mariott-lv
+
+# Список
+travel-wifi list
+#   mariott-lv             → MarriottGuest          (WPA)
+#   office-dad             → HomeOffice5G           (WPA)
+#   cafe-regular           → CafeWiFi               (открытая)
+
+# Удалить
+travel-wifi delete office-dad
+```
+
+Профили хранятся в `/etc/travel-wifi/<name>.conf`, переживают sysupgrade.
+
+## MAC-рандомизация — `travel-mac`
+
+Некоторые отельные Wi-Fi ограничивают «1 устройство на комнату» по MAC. Плюс привычный MAC = privacy-утечка (можно отследить, что вы были в 3 разных отелях одной сети).
+
+```bash
+travel-mac random        # новый случайный MAC на WAN, сохраняется
+travel-mac fixed 02:AA:BB:CC:DD:EE   # конкретный MAC
+travel-mac reset         # вернуть заводской
+travel-mac status        # показать текущий
+```
+
+После рандомизации WAN-интерфейс на 3-5 секунд прерывается (ifdown/ifup), потом переподключается с новым MAC.
+
+**Когда делать:**
+- Новый отель → `travel-mac random` перед `travel-connect` (чтобы отель счёл «новое устройство»)
+- Раз в месяц на постоянной сети для общей приватности
+
+## Полная диагностика — `travel-check`
+
+Одна команда показывает всё состояние роутера:
+
+```bash
+travel-check
+```
+
+Вывод:
+```
+  🛰  CHEBURNET-ROUTER TRAVEL DIAGNOSTIC
+────────────────────────────────────────────────────────────
+WAN источники:
+  Ethernet (eth0/wan)    UP       → 192.168.31.111
+  Wi-Fi WISP (wwan)      OFF      (travel-connect)
+  USB tether             EMPTY    (нет USB-устройства)
+  Default route:         via 192.168.31.1 dev eth0 src 192.168.31.111
+────────────────────────────────────────────────────────────
+VPN (AmneziaWG):
+  awg0                   handshake 70s ago
+  transfer:              402.18 MiB in / 104.06 MiB out
+  exit endpoint:         179.43.168.10:8630
+  Mode:                  home
+  Portal bypass:         off
+  Kill switch:           active
+────────────────────────────────────────────────────────────
+DNS:
+  Provider:              dns.quad9.net/dns-query (doh)
+  Live resolve:          OK (cloudflare.com → 104.16.133.229)
+────────────────────────────────────────────────────────────
+Adblock:
+  Hagezi Pro:            loaded, ~198560 domains (1498 KB gz)
+────────────────────────────────────────────────────────────
+Система:
+  Uptime:                2h 52m
+  Load avg:              0.26, 0.17, 0.10
+  Memory:                106 MB used / 485 MB total (21%, 313 MB free)
+  Overlay flash:         27.3M used / 205.0M total (14%)
+  WAN MAC:               94:83:c4:89:16:0c (factory)
+```
+
+Всё что надо для понимания состояния в одном экране.
+
 ## Продвинутые сценарии
 
 ### Автоматизация на ноутбуке
