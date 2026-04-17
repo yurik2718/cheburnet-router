@@ -361,7 +361,7 @@ reboot                           # Крайний случай
 
 - [docs/09-troubleshooting.md](09-troubleshooting.md) — глубокая диагностика
 - [docs/10-upgrades.md](10-upgrades.md) — lifecycle обновлений
-- [CLAUDE.md](../CLAUDE.md) — архитектурный контекст для AI/инженера
+- [AGENTS.md](../AGENTS.md) — архитектурный контекст для AI-ассистентов и инженеров
 
 ---
 
