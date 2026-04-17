@@ -1,0 +1,138 @@
+#!/bin/sh
+# travel-connect — подключить роутер к upstream Wi-Fi (отель, коворкинг, кафе)
+# в режиме WISP (роутер как клиент). Свой Wi-Fi (LAN AP) продолжает раздаваться.
+#
+# Использует radio0 (2.4 ГГц) — максимальная совместимость с любым upstream-AP.
+# Radio1 (5 ГГц) полностью остаётся для нашей LAN.
+#
+# Usage:
+#   travel-connect <SSID> [password]    — подключиться
+#   travel-connect --off                — отключиться, вернуть Ethernet WAN
+#   travel-connect --status             — текущее состояние
+
+usage() {
+    cat <<EOF
+travel-connect — WISP client mode (upstream Wi-Fi)
+
+Usage:
+  $0 <SSID> [password]     подключиться к upstream Wi-Fi
+  $0 --off                 отключиться
+  $0 --status              статус
+
+Примеры:
+  $0 "HotelWiFi"                    # открытая сеть
+  $0 "HotelGuest" "roomkey2024"     # WPA-PSK
+  $0 --off
+
+После подключения ваши LAN-устройства получают интернет через upstream.
+Если VPN включён (vpn-mode travel), весь трафик идёт через туннель.
+
+⚠ Если попали на captive-portal (отельная страница terms) — используйте:
+  travel-portal    (временно выключит VPN для принятия условий)
+EOF
+}
+
+status_cmd() {
+    if ! uci -q get network.wwan > /dev/null 2>&1; then
+        echo "Travel WISP: OFF (upstream через Ethernet WAN)"
+        return
+    fi
+    ssid=$(uci -q get wireless.wwan.ssid)
+    echo "Travel WISP: ON → '$ssid'"
+    ifstatus wwan 2>/dev/null | awk -F'"' '/ipv4-address/{getline; getline; print "  IP:", $4; exit}'
+    wait=$(ifstatus wwan 2>/dev/null | awk -F'"' '/"uptime"/{print $3; exit}' | tr -d ': ,')
+    [ -n "$wait" ] && echo "  uptime: ${wait}s"
+}
+
+disconnect() {
+    logger -t travel-connect "Disconnecting WISP"
+    echo "→ отключаюсь от upstream Wi-Fi..."
+    ifdown wwan 2>/dev/null
+    uci -q delete network.wwan
+    uci -q delete wireless.wwan
+    # Удаляем wwan из wan zone (если там)
+    ZONE=$(uci show firewall 2>/dev/null | awk -F'[][]' '/@zone.*name=.wan./{print $2; exit}')
+    if [ -n "$ZONE" ]; then
+        uci -q del_list firewall.@zone[$ZONE].network='wwan'
+    fi
+    uci commit network wireless firewall
+    wifi reload
+    /etc/init.d/network reload > /dev/null 2>&1
+    echo "✓ отключено. WAN теперь через Ethernet (если кабель воткнут)."
+}
+
+case "$1" in
+    ""|-h|--help)  usage; exit 0 ;;
+    --status|status) status_cmd; exit 0 ;;
+    --off|off|--disconnect) disconnect; exit 0 ;;
+esac
+
+SSID="$1"
+PSK="$2"
+
+# Validate password (WPA2/3 require 8+ chars)
+if [ -n "$PSK" ] && [ ${#PSK} -lt 8 ]; then
+    echo "ERROR: password < 8 символов (WPA2/3 требует 8+)" >&2
+    exit 1
+fi
+
+echo "→ подключаюсь к upstream '$SSID' на radio0 (2.4GHz)..."
+logger -t travel-connect "Connecting to upstream '$SSID'"
+
+# 1. network.wwan — DHCP-клиент
+uci set network.wwan=interface
+uci set network.wwan.proto='dhcp'
+
+# 2. wireless.wwan — STA-режим на radio0
+uci set wireless.wwan=wifi-iface
+uci set wireless.wwan.device='radio0'
+uci set wireless.wwan.network='wwan'
+uci set wireless.wwan.mode='sta'
+uci set wireless.wwan.ssid="$SSID"
+uci set wireless.wwan.disabled='0'
+if [ -n "$PSK" ]; then
+    uci set wireless.wwan.encryption='psk2'
+    uci set wireless.wwan.key="$PSK"
+else
+    uci set wireless.wwan.encryption='none'
+fi
+
+# 3. Добавить wwan в firewall wan-zone (чтобы masquerading работал)
+ZONE=$(uci show firewall | awk -F'[][]' '/@zone.*name=.wan./{print $2; exit}')
+if [ -z "$ZONE" ]; then
+    echo "ERROR: не найдена wan firewall zone" >&2
+    exit 1
+fi
+if ! uci -q get firewall.@zone[$ZONE].network | grep -qw wwan; then
+    uci add_list firewall.@zone[$ZONE].network='wwan'
+fi
+
+uci commit network wireless firewall
+
+# 4. Apply
+wifi reload
+sleep 3
+ifup wwan 2>/dev/null
+sleep 5
+
+# 5. Verify
+for i in 1 2 3 4 5; do
+    if ifstatus wwan 2>/dev/null | grep -q '"up": true'; then
+        IP=$(ifstatus wwan 2>/dev/null | awk -F'"' '/address/{getline; getline; print $4; exit}')
+        echo "✓ подключились к '$SSID'"
+        [ -n "$IP" ] && echo "  IP получен: $IP"
+        echo
+        echo "Дальше:"
+        echo "  - Если в сети captive portal: travel-portal  (временно выключить VPN)"
+        echo "  - Переключить в TRAVEL-режим: vpn-mode travel  (всё через VPN)"
+        logger -t travel-connect "Connected to '$SSID', IP=$IP"
+        exit 0
+    fi
+    sleep 2
+done
+
+echo "⚠ подключение не установилось за 15 секунд."
+echo "  Проверьте: правильные ли SSID/пароль, в зоне ли upstream-точка."
+echo "  Логи: logread -e wpa_supplicant"
+logger -t travel-connect "Connection to '$SSID' FAILED"
+exit 1

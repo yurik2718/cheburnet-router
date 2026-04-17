@@ -50,11 +50,15 @@ awg_healthy() {
 }
 
 mode=$(cat /etc/vpn-mode.state 2>/dev/null)
+portal_active=0
+[ -f /tmp/travel-portal.active ] && portal_active=1
 
-if ! awg_healthy; then
-    set_blink 200 200        # fast — VPN DOWN
+if [ "$portal_active" = 1 ]; then
+    set_blink 100 900        # heartbeat — PORTAL MODE (VPN сознательно выключен)
+elif ! awg_healthy; then
+    set_blink 200 200        # fast — VPN DOWN (alert)
 elif [ "$mode" = "travel" ]; then
-    set_blink 1000 1000      # slow — TRAVEL
+    set_blink 1000 1000      # slow — TRAVEL (full tunnel)
 else
     set_solid                # HOME (default happy)
 fi

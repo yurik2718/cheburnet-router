@@ -165,6 +165,7 @@ EOF
 | 🛡 08 | [Kill switch](docs/08-killswitch.md) | Defense-in-depth против утечек |
 | 🔧 09 | [Диагностика](docs/09-troubleshooting.md) | «что-то не работает — куда смотреть» |
 | 🔄 10 | [Обновления и lifecycle](docs/10-upgrades.md) | sysupgrade, apk upgrade, post-upgrade восстановление |
+| 🎒 11 | [TRAVEL-режим](docs/11-travel.md) | WISP-client, captive portal, workflow для отелей |
 
 ## Структура репозитория
 

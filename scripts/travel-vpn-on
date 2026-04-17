@@ -1,0 +1,35 @@
+#!/bin/sh
+# travel-vpn-on — восстановить VPN-защиту после captive portal bypass.
+
+LOCK=/tmp/travel-portal.active
+
+if [ ! -f "$LOCK" ]; then
+    echo "travel-portal не активен — ничего делать не надо."
+    /usr/bin/vpn-mode status
+    exit 0
+fi
+
+logger -t travel-portal "Restoring VPN routing"
+echo "→ восстанавливаю VPN-защиту..."
+
+# 1. Re-enable KillSwitch
+for RULE in $(uci show firewall | awk -F'[][=]' "/name=.KillSwitch-/{print \$2}"); do
+    uci -q delete firewall.@rule[$RULE].enabled
+done
+uci commit firewall
+/etc/init.d/firewall reload > /dev/null 2>&1
+
+# 2. Start podkop
+/etc/init.d/podkop start > /dev/null 2>&1 &
+echo "  подкop стартует..."
+sleep 6
+
+# 3. Drop lock
+rm -f "$LOCK"
+
+# 4. LED обновить (вернётся в solid/slow-blink согласно текущему режиму)
+/usr/bin/vpn-led > /dev/null 2>&1 || true
+
+echo
+echo "✓ VPN восстановлен"
+/usr/bin/vpn-mode status

@@ -1,0 +1,79 @@
+#!/bin/sh
+# travel-portal — временно отключить VPN для принятия captive portal
+# (отельная страница «Accept terms», требующая HTTP-взаимодействия).
+#
+# Что делает:
+#   1. Отключает kill switch rules в fw4
+#   2. Останавливает podkop (убирает tproxy)
+#   3. Запускает таймер автовосстановления (по умолчанию 15 минут)
+#   4. LED переключается на heartbeat-паттерн (distinctly от VPN DOWN)
+#
+# По окончании: либо сам отработает таймер, либо вручную `travel-vpn-on`.
+#
+# Usage:
+#   travel-portal           # включить на 15 мин (default)
+#   travel-portal 5         # включить на 5 мин
+#   travel-portal --off     # выключить сейчас (= travel-vpn-on)
+
+LOCK=/tmp/travel-portal.active
+MINUTES="${1:-15}"
+
+if [ "$1" = "--off" ] || [ "$1" = "off" ]; then
+    exec /usr/bin/travel-vpn-on
+fi
+
+# Validate numeric
+case "$MINUTES" in
+    ''|*[!0-9]*) echo "ERROR: minutes must be integer" >&2; exit 1 ;;
+esac
+[ "$MINUTES" -lt 1 ] && MINUTES=1
+[ "$MINUTES" -gt 60 ] && MINUTES=60
+
+logger -t travel-portal "Portal mode ON, auto-restore in ${MINUTES} min"
+
+# 1. Disable KillSwitch rules
+for RULE in $(uci show firewall | awk -F'[][=]' "/name=.KillSwitch-/{print \$2}"); do
+    uci set firewall.@rule[$RULE].enabled='0'
+done
+uci commit firewall
+/etc/init.d/firewall reload > /dev/null 2>&1
+
+# 2. Stop podkop (no more tproxy → LAN traffic flows direct through WAN)
+/etc/init.d/podkop stop > /dev/null 2>&1
+
+# 3. Mark active + start timer
+echo "$(date +%s) expires_after=${MINUTES}m" > "$LOCK"
+
+# 4. LED update (heartbeat pattern indicating deliberate bypass)
+/usr/bin/vpn-led > /dev/null 2>&1 || true
+
+# 5. Background timer — auto-restore after N minutes
+(
+    sleep $((MINUTES * 60))
+    if [ -f "$LOCK" ]; then
+        logger -t travel-portal "Timer expired, auto-restoring VPN"
+        /usr/bin/travel-vpn-on > /dev/null 2>&1
+    fi
+) > /dev/null 2>&1 &
+
+cat <<EOF
+
+╔════════════════════════════════════════════════════════╗
+║              ПОРТАЛ-РЕЖИМ АКТИВЕН                      ║
+║              VPN временно выключен                     ║
+╠════════════════════════════════════════════════════════╣
+
+  Что делать сейчас:
+    1. Откройте браузер на ноутбуке/телефоне
+    2. Зайдите на http://neverssl.com (или любой HTTP-сайт)
+    3. Отельный портал перехватит → примите условия
+    4. Возобновите VPN: travel-vpn-on
+       (или ничего не делайте — восстановится через ${MINUTES} мин)
+
+  LED: "heartbeat" паттерн (короткая вспышка раз в секунду)
+
+  ⚠ Пока портал-режим активен, ваш трафик идёт НАПРЯМУЮ
+    через отельную сеть. Не логиньтесь в банки/почту/соцсети.
+
+╚════════════════════════════════════════════════════════╝
+EOF
