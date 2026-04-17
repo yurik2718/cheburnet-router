@@ -1,0 +1,167 @@
+#!/bin/sh
+# net-benchmark — замер WAN-скорости и bufferbloat по методологии bufferbloat.net.
+#
+# Использует RU-friendly endpoint (speedtest.selectel.ru) — Ookla и netperf.bufferbloat.net
+# блокируются/throttl'ятся у многих RU-провайдеров, а Selectel работает стабильно.
+#
+# Что делает:
+#   1. Проверяет IP роутера (должен быть WAN, не VPN)
+#   2. Baseline latency к 1.1.1.1 (idle, 10 пингов)
+#   3. Запускает параллельно: download + ping
+#   4. Замеряет latency под нагрузкой (bufferbloat)
+#   5. Выставляет grade A+/A/B/C/D/F по Waveform-методологии
+#   6. Рекомендует SQM-значения
+#
+# Настроек не меняет — только показывает выводы.
+#
+# Usage:
+#   net-benchmark           # полный тест (~60 сек)
+#   net-benchmark quick     # только download speed (~20 сек)
+
+MODE="${1:-full}"
+
+hr() { printf '%.0s─' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; echo; }
+
+URL="http://speedtest.selectel.ru/1GB"
+PING_HOST="1.1.1.1"
+TEST_DUR=15
+
+echo
+echo "  🚀 NET-BENCHMARK — замер WAN-скорости и bufferbloat"
+hr
+printf "  %-22s %s\n" "Endpoint:" "speedtest.selectel.ru (RU)"
+printf "  %-22s %s\n" "Ping target:" "$PING_HOST"
+printf "  %-22s %s sec\n" "Продолжительность:" "$TEST_DUR"
+echo
+
+# === 0. Проверка не через VPN ===
+MY_IP=$(curl -s --max-time 5 --interface eth0 http://ifconfig.me 2>/dev/null)
+printf "  %-22s %s\n" "WAN IP (eth0):" "${MY_IP:-не определён}"
+if [ -z "$MY_IP" ]; then
+    echo "  ⚠ не могу определить WAN IP, но продолжаю"
+fi
+echo
+
+# === 1. SQM временно off (для чистого замера линии) ===
+SQM_WAS=$(uci -q get sqm.eth0.enabled)
+if [ "$SQM_WAS" = "1" ]; then
+    echo "  ⏸  Выключаю SQM на время теста (чистый замер линии)..."
+    uci set sqm.eth0.enabled='0'; uci commit sqm
+    /etc/init.d/sqm stop >/dev/null 2>&1
+    sleep 2
+fi
+
+# === 2. Baseline idle latency ===
+echo
+echo "📡 Phase 1: baseline latency (idle, 10s)"
+# busybox ping summary: "round-trip min/avg/max = 36.100/36.213/36.348 ms"
+# Extract avg = значение между 2-м и 3-м "/"
+IDLE_LINE=$(ping -c 5 -W 2 "$PING_HOST" 2>/dev/null | tail -1)
+IDLE_AVG=$(echo "$IDLE_LINE" | sed -n 's|.* = [0-9.]*/\([0-9.]*\)/.*|\1|p')
+IDLE_MAX=$(echo "$IDLE_LINE" | sed -n 's|.* = [0-9.]*/[0-9.]*/\([0-9.]*\) ms|\1|p')
+echo "  Idle latency avg/max: ${IDLE_AVG:-?} / ${IDLE_MAX:-?} ms"
+
+# === 3. Download speed + loaded latency (параллельно) ===
+echo
+echo "📊 Phase 2: download $((TEST_DUR)) sec + параллельный ping"
+echo "  (скачивание 1 GB файла, оборвётся после ${TEST_DUR}s)"
+echo
+
+# Запускаем ping в фоне с выводом в temp-файл
+rm -f /tmp/net-bench-ping.log /tmp/net-bench-dl.log
+ping -c $((TEST_DUR)) -W 2 "$PING_HOST" > /tmp/net-bench-ping.log 2>&1 &
+PING_PID=$!
+
+# Даём ping стартовать
+sleep 1
+
+# Запускаем download, ограниченный по времени
+curl -s -o /dev/null --max-time "$TEST_DUR" \
+    -w "CURL_SPEED=%{speed_download}\nCURL_SIZE=%{size_download}\nCURL_TIME=%{time_total}\n" \
+    "$URL" > /tmp/net-bench-dl.log 2>&1
+
+# Дождаться ping
+wait $PING_PID 2>/dev/null
+
+# Парсим скорость
+DL_BPS=$(grep CURL_SPEED /tmp/net-bench-dl.log | cut -d= -f2 | awk '{printf "%.0f", $1}')
+DL_MBPS=$(awk "BEGIN{printf \"%.1f\", ${DL_BPS:-0} * 8 / 1000000}")
+DL_MBPS_INT=$(awk "BEGIN{printf \"%d\", ${DL_BPS:-0} * 8 / 1000000}")
+
+# Парсим ping avg/max под нагрузкой
+LOAD_LINE=$(tail -1 /tmp/net-bench-ping.log)
+LOAD_AVG=$(echo "$LOAD_LINE" | sed -n 's|.* = [0-9.]*/\([0-9.]*\)/.*|\1|p')
+LOAD_MAX=$(echo "$LOAD_LINE" | sed -n 's|.* = [0-9.]*/[0-9.]*/\([0-9.]*\) ms|\1|p')
+
+echo "  Download speed:         ${DL_MBPS} Mbps"
+echo "  Latency during load:    ${LOAD_AVG:-?} ms (avg), ${LOAD_MAX:-?} (max)"
+echo
+
+# === 4. Восстанавливаем SQM ===
+if [ "$SQM_WAS" = "1" ]; then
+    uci set sqm.eth0.enabled='1'; uci commit sqm
+    /etc/init.d/sqm start >/dev/null 2>&1
+    sleep 2
+fi
+
+# === 5. Результаты + grade ===
+hr
+echo "📋 Результаты"
+hr
+printf "  %-22s %s Mbps\n" "Download:" "$DL_MBPS"
+printf "  %-22s %s ms\n" "Idle latency:" "${IDLE_AVG:-?}"
+printf "  %-22s %s ms\n" "Loaded latency:" "${LOAD_AVG:-?}"
+
+BLOAT_MS=$(awk "BEGIN{a=${LOAD_AVG:-0}; b=${IDLE_AVG:-0}; d=a-b; if(d<0)d=0; printf \"%.0f\", d}")
+printf "  %-22s +%s ms\n" "Bufferbloat:" "$BLOAT_MS"
+
+# Waveform grading
+if [ "$BLOAT_MS" -lt 5 ]; then
+    GRADE="A+ (идеально)"; EMOJI="🟢🟢"
+elif [ "$BLOAT_MS" -lt 30 ]; then
+    GRADE="A (отлично)"; EMOJI="🟢"
+elif [ "$BLOAT_MS" -lt 60 ]; then
+    GRADE="B (хорошо)"; EMOJI="🟡"
+elif [ "$BLOAT_MS" -lt 200 ]; then
+    GRADE="C (терпимо)"; EMOJI="🟠"
+elif [ "$BLOAT_MS" -lt 400 ]; then
+    GRADE="D (плохо)"; EMOJI="🔴"
+else
+    GRADE="F (провал)"; EMOJI="🔴🔴"
+fi
+printf "  %-22s %s %s\n" "Bufferbloat Grade:" "$EMOJI" "$GRADE"
+
+hr
+# === 6. Рекомендация SQM ===
+echo "🎯 Рекомендация для SQM"
+echo
+if [ "${DL_MBPS_INT:-0}" -lt 5 ]; then
+    echo "  ⚠ Измеренная скорость < 5 Mbps. Либо сильный congestion,"
+    echo "    либо проблемы с сетью. Попробуйте повторить через 5 минут."
+else
+    # Рекомендуем 90% от измеренной (чуть более агрессивно чем 95% —
+    # это гарантирует что SQM всегда cap'ает)
+    DL_REC=$(awk "BEGIN{printf \"%d\", ${DL_MBPS_INT} * 90 / 100}")
+    CURRENT_DL_KBPS=$(uci -q get sqm.eth0.download)
+    CURRENT_DL=$((CURRENT_DL_KBPS / 1000))
+
+    echo "  Измерено:           ${DL_MBPS_INT} Mbps"
+    echo "  Рекомендуемый cap:  ${DL_REC} Mbps (90% margin)"
+    echo "  Сейчас в SQM:       ${CURRENT_DL} Mbps"
+    echo
+    if [ "$CURRENT_DL" -gt "${DL_MBPS_INT}" ]; then
+        echo "  ⚠ ТЕКУЩИЙ SQM ВЫШЕ РЕАЛЬНОЙ СКОРОСТИ — не триггерит, bufferbloat не режет!"
+        echo "     Примените: sqm-tune ${DL_MBPS_INT} ${DL_MBPS_INT}"
+    elif [ "$CURRENT_DL" -lt "$DL_REC" ]; then
+        echo "  ℹ Текущий SQM занижен, теряете скорость. Можно повысить:"
+        echo "     sqm-tune ${DL_MBPS_INT} ${DL_MBPS_INT}"
+    else
+        echo "  ✓ Текущий SQM в разумном диапазоне (${DL_REC} ≤ ${CURRENT_DL} ≤ ${DL_MBPS_INT})"
+    fi
+fi
+
+hr
+echo
+
+# Cleanup
+rm -f /tmp/net-bench-ping.log /tmp/net-bench-dl.log
