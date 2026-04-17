@@ -55,7 +55,8 @@ echo "✓ файлы скопированы"
 
 # === 2. Поочерёдно запускаем setup-скрипты ===
 for SCRIPT in 00-prerequisites.sh 01-amneziawg.sh 02-podkop.sh 03-adblock.sh \
-              04-dns.sh 06-slider-led.sh 07-killswitch.sh 08-watchdog.sh; do
+              04-dns.sh 06-slider-led.sh 07-killswitch.sh 08-watchdog.sh \
+              09-ssh-hardening.sh; do
     echo
     echo "=== RUN: setup/$SCRIPT ==="
     ssh "$ROUTER" 'sh -s' < "$REPO_ROOT/setup/$SCRIPT"

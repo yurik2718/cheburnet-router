@@ -196,6 +196,29 @@ nft -a list chain inet fw4 forward_lan | grep -i killswitch
 /etc/init.d/podkop restart
 ```
 
+## SSH hardening (дополнительный слой защиты управления)
+
+Kill switch закрывает утечку данных. Отдельная задача — **закрыть вход** для атакующего: хорошо сделать SSH доступ инвариантным к компрометации паролей.
+
+**Что сделано:**
+
+1. **PasswordAuth = off в dropbear** — SSH принимает **только ключ**. Даже если кто-то узнает пароль root'а (утёк, слабый), зайти по SSH не сможет.
+2. **RootPasswordAuth = off** — дублирующая защита конкретно для root-аккаунта.
+3. **fw4 правило `Block-SSH-from-WAN`** — REJECT для tcp/22 с WAN-зоны. Даже если upstream-роутер настроит port forwarding, SSH останется закрытым. Belt-and-suspenders сверх дефолтного REJECT WAN-input.
+
+**Порт оставлен 22.** Менять на 22222/случайный — **security through obscurity**. WAN и так закрыт firewall'ом, с LAN никто не сканирует 22. Если в будущем сделаете port-forwarding на upstream — смените порт одной командой `uci set dropbear.main.Port=51234 && uci commit && /etc/init.d/dropbear restart`.
+
+**Rate-limit SSH** решено НЕ делать. Наш threat model: SSH доступен только с LAN (~5 устройств, все известные). Brute-force сценарий не актуален. Добавлять complexity без реальной выгоды — плохая инженерия.
+
+**Что должно быть у вас (на ноутбуке):**
+
+```bash
+~/.ssh/beryl              # приватный ключ (chmod 600)
+~/.ssh/beryl.pub          # публичный — скопирован в /etc/dropbear/authorized_keys на роутере
+```
+
+Если потеряете приватный ключ — зайти по SSH будет невозможно (только через физический консольный порт или factory reset). Делайте бэкап ключа.
+
 ## Что НЕ защищает kill switch
 
 Честно о границах:

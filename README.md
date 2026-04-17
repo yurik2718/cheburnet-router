@@ -24,6 +24,7 @@
 - 🛡 **Kill switch**: если VPN упал — трафик блокируется, а не течёт напрямую
 - 📡 **Wi-Fi WPA2/WPA3-mixed** с PMF (Protected Management Frames)
 - ⚙️ **Авто-восстановление**: health-check DNS, watchdog handshake AWG (перезапуск интерфейса при протухании рукопожатия)
+- 🔐 **SSH hardening**: key-only auth, firewall-блок SSH с WAN
 
 ## Железо, на котором проверено
 
