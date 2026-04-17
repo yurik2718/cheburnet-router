@@ -1,0 +1,47 @@
+#!/bin/sh
+# sqm-tune — включить SQM с правильной скоростью под ваш ISP.
+# Применяется 95% margin (нужно чтобы бутылочное горлышко было у нас, не у ISP).
+#
+# Usage: sqm-tune <download_Mbps> <upload_Mbps>
+# Пример: sqm-tune 500 500
+#
+# Как измерить скорость (ПЕРЕД включением SQM):
+#   1. На LAN-клиенте: поставьте слайдер в TRAVEL или зайдите с другого подключения
+#   2. fast.com или speedtest.net
+#   3. Запишите Download / Upload в Mbps
+
+if [ $# -ne 2 ]; then
+    cat <<USAGE
+Usage: $0 <download_Mbps> <upload_Mbps>
+Пример: $0 500 500
+
+Применяемая формула: ${X} Mbps × 950 = ${X}×95% Mbps в kbit/s
+  (95% — индустриальный стандарт margin для SQM)
+
+Измерьте реальную скорость ISP перед запуском!
+USAGE
+    exit 1
+fi
+
+DOWN_MBPS=$1
+UP_MBPS=$2
+DOWN_KBPS=$(( DOWN_MBPS * 950 ))
+UP_KBPS=$(( UP_MBPS * 950 ))
+
+uci set sqm.eth0.download="$DOWN_KBPS"
+uci set sqm.eth0.upload="$UP_KBPS"
+uci set sqm.eth0.enabled=1
+uci commit sqm
+/etc/init.d/sqm enable
+/etc/init.d/sqm restart
+
+echo "✓ SQM включён на eth0 (WAN):"
+echo "    download: ${DOWN_KBPS} kbit/s ($(( DOWN_KBPS / 1000 )) Mbps, 95% от ${DOWN_MBPS} заявленных)"
+echo "    upload:   ${UP_KBPS} kbit/s ($(( UP_KBPS / 1000 )) Mbps, 95% от ${UP_MBPS})"
+echo "    qdisc:    cake (piece_of_cake.qos)"
+echo
+echo "Проверить работу:"
+echo "    tc -s qdisc show dev eth0"
+echo
+echo "Потестировать bufferbloat:"
+echo "    https://www.waveform.com/tools/bufferbloat"

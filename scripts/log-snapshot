@@ -1,0 +1,19 @@
+#!/bin/sh
+# log-snapshot — ежедневный снапшот логов в файл на flash.
+# Запускается cron'ом раз в сутки в 23:55 (конец дня).
+# Хранит логи за последние 14 дней.
+#
+# Почему не включаем log_file напрямую в dropbear/logd:
+#   logd пишет в файл непрерывно — каждое событие вызывает запись на flash.
+#   NAND-flash имеет ограниченный ресурс записи. Шумный сервис может изнашивать flash.
+#   Снапшот раз в день = 1 запись в сутки, безопасно для ресурса.
+
+LOG_DIR=/root/logs
+DAYS_TO_KEEP=14
+mkdir -p "$LOG_DIR"
+
+# Снапшот текущего ring-buffer'а logd
+logread > "$LOG_DIR/system-$(date +%Y-%m-%d).log"
+
+# Очистка старых файлов
+find "$LOG_DIR" -name "system-*.log" -mtime +$DAYS_TO_KEEP -delete 2>/dev/null

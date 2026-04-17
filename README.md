@@ -25,6 +25,9 @@
 - 📡 **Wi-Fi WPA2/WPA3-mixed** с PMF (Protected Management Frames)
 - ⚙️ **Авто-восстановление**: health-check DNS, watchdog handshake AWG (перезапуск интерфейса при протухании рукопожатия)
 - 🔐 **SSH hardening**: key-only auth, firewall-блок SSH с WAN
+- 📋 **Persistent логи**: ежедневный снапшот в `/root/logs/`, хранение 14 дней
+- 🕐 **Timezone MSK** для читаемых логов
+- 🚦 **SQM (CAKE)** установлен для защиты от bufferbloat (тюнинг под ISP — `sqm-tune`)
 
 ## Железо, на котором проверено
 
@@ -89,6 +92,8 @@ cheburnet-router/
 │   ├── dns-provider                 Свитч DNS-провайдера
 │   ├── dns-healthcheck              Автофейловер DoH
 │   ├── awg-watchdog                 Авто-рестарт AWG при протухшем handshake
+│   ├── log-snapshot                 Ежедневный снапшот логов на flash
+│   ├── sqm-tune                     Включение SQM с правильной скоростью ISP
 │   ├── hotplug/button/10-vpn-mode   Хендлер слайдера
 │   └── init.d/vpn-mode              Синхронизация режима при загрузке
 ├── configs/                     ← шаблоны UCI (без секретов)

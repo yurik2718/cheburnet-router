@@ -24,7 +24,7 @@ fi
 
 # === 2. Custom scripts ===
 echo "→ custom scripts"
-for F in vpn-mode vpn-led dns-provider dns-healthcheck awg-watchdog; do
+for F in vpn-mode vpn-led dns-provider dns-healthcheck awg-watchdog log-snapshot sqm-tune; do
     if [ -f "$SNAP/usr-bin/$F" ]; then
         scp -q "$SNAP/usr-bin/$F" "$ROUTER":/usr/bin/$F
         ssh "$ROUTER" "chmod +x /usr/bin/$F"
