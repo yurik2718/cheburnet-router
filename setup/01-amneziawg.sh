@@ -50,10 +50,19 @@ JMIN=$(get_iface Jmin)
 JMAX=$(get_iface Jmax)
 S1=$(get_iface S1)
 S2=$(get_iface S2)
+# v1.5 опциональные параметры (могут отсутствовать в v1.0 конфигах):
+S3=$(get_iface S3)
+S4=$(get_iface S4)
 H1=$(get_iface H1)
 H2=$(get_iface H2)
 H3=$(get_iface H3)
 H4=$(get_iface H4)
+# I1-I5 — Custom Protocol Signature (AWG v1.5), опционально:
+I1=$(get_iface I1)
+I2=$(get_iface I2)
+I3=$(get_iface I3)
+I4=$(get_iface I4)
+I5=$(get_iface I5)
 
 PUB=$(get_peer PublicKey)
 PSK=$(get_peer PresharedKey)
@@ -84,6 +93,14 @@ uci set network.awg0.awg_h1="$H1"
 uci set network.awg0.awg_h2="$H2"
 uci set network.awg0.awg_h3="$H3"
 uci set network.awg0.awg_h4="$H4"
+# v1.5 опциональные параметры — устанавливаем только если есть в конфиге
+[ -n "$S3" ] && uci set network.awg0.awg_s3="$S3"
+[ -n "$S4" ] && uci set network.awg0.awg_s4="$S4"
+[ -n "$I1" ] && uci set network.awg0.awg_i1="$I1"
+[ -n "$I2" ] && uci set network.awg0.awg_i2="$I2"
+[ -n "$I3" ] && uci set network.awg0.awg_i3="$I3"
+[ -n "$I4" ] && uci set network.awg0.awg_i4="$I4"
+[ -n "$I5" ] && uci set network.awg0.awg_i5="$I5"
 
 # Peer section
 while uci -q delete network.@amneziawg_awg0[0]; do :; done
