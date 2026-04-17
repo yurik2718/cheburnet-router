@@ -1,0 +1,33 @@
+#!/bin/sh
+# DNS provider switcher for podkop
+# Usage: dns-provider {quad9|cloudflare|status}
+
+log() { logger -t dns-provider "$*"; }
+
+current() { uci -q get podkop.settings.dns_server; }
+
+apply() {
+    local server="$1" name="$2"
+    [ "$(current)" = "$server" ] && return 0
+    uci set podkop.settings.dns_server="$server"
+    uci commit podkop
+    /etc/init.d/podkop reload >/dev/null 2>&1 &
+    log "switched to $name ($server)"
+}
+
+case "$1" in
+    quad9)      apply "dns.quad9.net/dns-query"      "Quad9 (CH, no-log, malware-block)" ;;
+    cloudflare) apply "cloudflare-dns.com/dns-query" "Cloudflare (US, fast, no-log)" ;;
+    status)
+        srv=$(current)
+        case "$srv" in
+            dns.quad9.net/dns-query)      echo "Active: Quad9 DoH ($srv)" ;;
+            cloudflare-dns.com/dns-query) echo "Active: Cloudflare DoH ($srv)" ;;
+            *) echo "Active: $srv" ;;
+        esac
+        echo "Bootstrap: $(uci -q get podkop.settings.bootstrap_dns_server)"
+        echo "Type: $(uci -q get podkop.settings.dns_type)"
+        ;;
+    *)
+        echo "Usage: $0 {quad9|cloudflare|status}" >&2; exit 1 ;;
+esac

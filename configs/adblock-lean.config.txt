@@ -1,0 +1,110 @@
+
+# adblock-lean configuration options
+# config_format=v11
+#
+# values must be enclosed in double-quotes
+# custom comments are not preserved after automatic config update
+
+# Whitelist mode: only domains (and their subdomains) included in the allowlist(s) are allowed, all other domains are blocked
+# In this mode, if blocklists are used in addition to allowlists, subdomains included in the blocklists will be blocked,
+# including subdomains of allowed domains
+whitelist_mode="0"
+
+# One or more *raw domain* format [blocklist]/[ipv4 blocklist]/[allowlist] URLs and/or short list identifiers separated by spaces
+# Short list identifiers have the form of [hagezi|oisd]:[list_name]. Examples: hagezi:tif.mini, oisd:big
+raw_block_lists="hagezi:pro"
+raw_allow_lists=""
+raw_ipv4_block_lists=""
+
+# One or more *dnsmasq* format [blocklist]/[ipv4 blocklist]/[allowlist] URLs and/or short list identifiers separated by spaces
+dnsmasq_block_lists=""
+dnsmasq_allow_lists=""
+dnsmasq_ipv4_block_lists=""
+
+# One or more *hosts* format blocklist URLs and/or short list identifiers separated by spaces
+hosts_block_lists=""
+
+# Path to optional local *raw domain* allowlist/blocklist files in the form:
+# site1.com
+# site2.com
+local_allowlist_path="/etc/adblock-lean/allowlist"
+local_blocklist_path="/etc/adblock-lean/blocklist"
+
+# Test domains are automatically querried after loading the blocklist into dnsmasq,
+# in order to verify that the blocklist didn't break DNS resolution
+# If query for any of the test domains fails, previous blocklist is restored from backup
+# If backup doesn't exist, the blocklist is removed and adblock-lean is stopped
+# Leaving this empty will disable verification
+test_domains="google.com microsoft.com amazon.com"
+
+# List part failed action:
+# This option applies to blocklist/allowlist parts which failed to download or couldn't pass validation checks
+# SKIP - skip failed blocklist file part and continue blocklist generation
+# STOP - stop blocklist generation (and fall back to previous blocklist if available)
+list_part_failed_action="SKIP"
+
+# Maximum number of download retries
+max_download_retries="3"
+
+# Default download mirrors.
+# Hagezi mirror: 'github' or 'gitlab'
+hagezi_default_mirror="github"
+# oisd mirror: 'oisd' or 'github'
+oisd_default_mirror="oisd"
+# Steven Black mirror: 'github' or 'sbc_io' for sbc.io
+stevenblack_default_mirror="github"
+
+# Minimum number of good lines in final postprocessed blocklist
+min_good_line_count="71000"
+
+# Mininum number of lines of any individual downloaded part
+min_blocklist_part_line_count="1"
+min_ipv4_blocklist_part_line_count="1"
+min_allowlist_part_line_count="1"
+
+# Maximum size of any individual downloaded blocklist part
+max_file_part_size_KB="6100"
+
+# Maximum total size of combined, processed blocklist
+max_blocklist_file_size_KB="6100"
+
+# Whether to perform sorting and deduplication of entries (usually doesn't cause much slowdown, uses a bit more memory) - enable (1) or disable (0)
+deduplication="1"
+
+# Utility to compress final blocklist, intermediate blocklist parts and the backup blocklist to save memory
+# Supported options: gzip, pigz, zstd or 'none' to disable compression
+compression_util="gzip"
+
+# Compression options: passed as-is to the compression utility
+# Available options depend on the compression utility. '-[n]' universally specifies compression level.
+# Busybox gzip ignores any options.
+#   Intermediate compression. Default: '-3'.
+intermediate_compression_options="-3"
+#   Final blocklist compression. Default: '-6'
+final_compression_options="-6"
+
+# unload previous blocklist form memory and restart dnsmasq before generation of
+# new blocklist in order to free up memory during generation of new blocklist - 'auto' or enable (1) or disable (0)
+unload_blocklist_before_update="auto"
+
+# Start delay in seconds when service is started from system boot
+boot_start_delay_s="120"
+
+# Maximal count of download and processing jobs run in parallel. 'auto' sets this value to the count of CPU cores
+MAX_PARALLEL_JOBS="auto"
+
+# If a path to custom script is specified and that script defines functions
+# 'report_success()', 'report_failure()' or 'report_update()',
+# one of these functions will be executed when adblock-lean completes the execution of some commands,
+# with corresponding message passed in first argument
+# report_success() and report_update() are only executed upon completion of the 'start' command
+# Recommended path is '/usr/libexec/abl_custom-script.sh' which the luci app has permission to access
+custom_script=""
+
+# Crontab schedule expression for periodic list updates
+cron_schedule="disable"
+
+# dnsmasq instance indexes and config directories
+# normally this should be set automatically by the 'setup' command
+DNSMASQ_INDEXES="0"
+DNSMASQ_CONF_DIRS="/tmp/dnsmasq.cfg01411c.d"

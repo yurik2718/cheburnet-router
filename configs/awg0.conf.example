@@ -1,0 +1,20 @@
+[Interface]
+Address = 10.x.x.x/32
+DNS = 100.64.0.1, 8.8.4.4
+PrivateKey = REPLACE_WITH_YOUR_KEY
+Jc = 4
+Jmin = 10
+Jmax = 50
+S1 = 82
+S2 = 44
+H1 = 1754556670
+H2 = 323984459
+H3 = 1156386384
+H4 = 1526318555
+
+[Peer]
+PublicKey = REPLACE_WITH_YOUR_KEY
+PresharedKey = REPLACE_WITH_YOUR_KEY
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = your.server.ip:PORT
+PersistentKeepalive = 25

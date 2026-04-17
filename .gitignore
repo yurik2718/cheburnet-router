@@ -1,0 +1,27 @@
+# Секреты — НИКОГДА не коммитим
+*.key
+*.pem
+*.crt
+*.p12
+secrets/
+configs/*.real
+configs/awg0.conf
+configs/wireless-actual.*
+configs/wireless.uci.txt
+!configs/*.example*
+
+# Локальные бэкапы
+backup/snapshots/
+*.tar.gz
+*.tar.zst
+
+# Редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Прочее
+*.log
+.env

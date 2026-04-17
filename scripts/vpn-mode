@@ -1,0 +1,80 @@
+#!/bin/sh
+# VPN mode switcher for podkop on GL-MT3000 slider
+# pressed (slider LEFT)  = home   — VPN for all except RU services
+# released (slider RIGHT) = travel — full tunnel, everything via VPN
+#
+# Usage: vpn-mode {home|travel|detect|status|toggle}
+
+STATE_FILE=/etc/vpn-mode.state
+
+log() { logger -t vpn-mode "$*"; }
+
+reload_podkop() {
+    /etc/init.d/podkop reload >/dev/null 2>&1 &
+}
+
+apply_home() {
+    uci set podkop.exclude_ru=section
+    uci set podkop.exclude_ru.connection_type='exclusion'
+    uci set podkop.exclude_ru.user_domain_list_type='dynamic'
+    uci -q delete podkop.exclude_ru.community_lists
+    uci add_list podkop.exclude_ru.community_lists='russia_outside'
+    uci -q delete podkop.exclude_ru.user_domains
+    uci add_list podkop.exclude_ru.user_domains='.ru'
+    uci add_list podkop.exclude_ru.user_domains='.su'
+    uci add_list podkop.exclude_ru.user_domains='.xn--p1ai'
+    uci add_list podkop.exclude_ru.user_domains='vk.com'
+    uci commit podkop
+    echo home > "$STATE_FILE"
+    log "mode=HOME applied (VPN for all except RU)"
+    /usr/bin/vpn-led
+}
+
+apply_travel() {
+    uci -q delete podkop.exclude_ru.community_lists
+    uci -q delete podkop.exclude_ru.user_domains
+    uci -q delete podkop.exclude_ru.user_domain_list_type
+    uci commit podkop
+    echo travel > "$STATE_FILE"
+    log "mode=TRAVEL applied (full tunnel)"
+    /usr/bin/vpn-led
+}
+
+gpio_state() {
+    grep -E '\|mode[[:space:]]+\)' /sys/kernel/debug/gpio 2>/dev/null \
+        | grep -oE 'in +(hi|lo)' | awk '{print $2}'
+}
+
+detected_mode() {
+    case "$(gpio_state)" in
+        lo) echo travel ;;
+        hi) echo home ;;
+        *)  echo unknown ;;
+    esac
+}
+
+current_mode() { cat "$STATE_FILE" 2>/dev/null; }
+
+case "$1" in
+    home)
+        [ "$(current_mode)" = home ] && exit 0
+        apply_home; reload_podkop ;;
+    travel)
+        [ "$(current_mode)" = travel ] && exit 0
+        apply_travel; reload_podkop ;;
+    detect)
+        want=$(detected_mode)
+        [ "$want" = unknown ] && { log "detect: GPIO state unknown, skipping"; exit 0; }
+        [ "$(current_mode)" = "$want" ] && exit 0
+        "$0" "$want" ;;
+    toggle)
+        [ "$(current_mode)" = home ] && "$0" travel || "$0" home ;;
+    status)
+        echo "Saved state:  $(current_mode || echo unset)"
+        echo "Slider GPIO:  $(gpio_state) -> $(detected_mode)"
+        echo "UCI exclude_ru.community_lists: $(uci -q get podkop.exclude_ru.community_lists || echo '(empty)')"
+        echo "UCI exclude_ru.user_domains:    $(uci -q get podkop.exclude_ru.user_domains || echo '(empty)')" ;;
+    *)
+        echo "Usage: $0 {home|travel|detect|toggle|status}" >&2
+        exit 1 ;;
+esac

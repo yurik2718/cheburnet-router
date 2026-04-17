@@ -1,0 +1,77 @@
+#!/bin/sh
+# DNS health check + automatic failover between Quad9 and Cloudflare
+# Run every 5 min via cron. Fails 3x in a row -> swap provider.
+# When on fallback, probes primary every hour to switch back.
+
+STATE_DIR=/tmp/dns-health
+mkdir -p "$STATE_DIR"
+FAIL_FILE="$STATE_DIR/fails"
+LAST_RETRY_FILE="$STATE_DIR/last-retry"
+MAX_FAILS=3
+RETRY_BACK_SECONDS=3600   # try to return to Quad9 after 1h on fallback
+PROBE_TIMEOUT=3
+
+log() { logger -t dns-health "$*"; }
+
+# Resolve a well-known name via local dnsmasq (which feeds sing-box + current DoH)
+probe_current() {
+    nslookup -timeout="$PROBE_TIMEOUT" cloudflare.com 127.0.0.1 2>/dev/null \
+        | grep -qE "Address.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
+}
+
+# Probe a specific DoH endpoint directly (used to test before switching back)
+probe_upstream() {
+    local ip="$1"
+    nslookup -timeout="$PROBE_TIMEOUT" cloudflare.com "$ip" 2>/dev/null \
+        | grep -qE "Address.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
+}
+
+current_provider() {
+    case "$(uci -q get podkop.settings.dns_server)" in
+        dns.quad9.net/dns-query)      echo quad9 ;;
+        cloudflare-dns.com/dns-query) echo cloudflare ;;
+        *)                            echo other ;;
+    esac
+}
+
+get_fails() { cat "$FAIL_FILE" 2>/dev/null || echo 0; }
+set_fails() { echo "$1" > "$FAIL_FILE"; }
+
+if probe_current; then
+    set_fails 0
+    # Healthy — if currently on fallback Cloudflare, occasionally try to return to Quad9
+    if [ "$(current_provider)" = "cloudflare" ]; then
+        now=$(date +%s)
+        last_retry=$(cat "$LAST_RETRY_FILE" 2>/dev/null || echo 0)
+        if [ $((now - last_retry)) -ge $RETRY_BACK_SECONDS ]; then
+            echo "$now" > "$LAST_RETRY_FILE"
+            if probe_upstream 9.9.9.9; then
+                log "Quad9 reachable again, restoring as primary"
+                /usr/bin/dns-provider quad9
+            else
+                log "Quad9 still unreachable, staying on Cloudflare"
+            fi
+        fi
+    fi
+    exit 0
+fi
+
+# Probe failed — count
+fails=$(( $(get_fails) + 1 ))
+set_fails "$fails"
+[ "$fails" -lt "$MAX_FAILS" ] && exit 0
+
+# Persistent failure — swap to the other provider
+case "$(current_provider)" in
+    quad9)
+        log "Quad9 DNS failed ${fails}x, failover to Cloudflare"
+        /usr/bin/dns-provider cloudflare
+        set_fails 0
+        date +%s > "$LAST_RETRY_FILE"
+        ;;
+    cloudflare)
+        log "Cloudflare DNS failed ${fails}x, trying Quad9 again"
+        /usr/bin/dns-provider quad9
+        set_fails 0
+        ;;
+esac

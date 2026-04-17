@@ -1,0 +1,35 @@
+#!/bin/sh
+# vpn-led — set blue:run LED pattern based on AWG health + current mode
+#   SOLID       = HOME + AWG handshake fresh  (normal happy state)
+#   SLOW BLINK  = TRAVEL + AWG handshake fresh
+#   FAST BLINK  = AWG handshake stale/missing (VPN down, attention needed)
+
+LED=/sys/class/leds/blue:run
+[ -d "$LED" ] || exit 0
+
+set_solid() {
+    echo none > "$LED/trigger"
+    echo 1    > "$LED/brightness"
+}
+
+set_blink() {
+    echo timer > "$LED/trigger"
+    echo "$1"  > "$LED/delay_on"
+    echo "$2"  > "$LED/delay_off"
+}
+
+awg_healthy() {
+    local hs
+    hs=$(awg show awg0 latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+    [ -n "$hs" ] && [ "$hs" -gt 0 ] && [ $(( $(date +%s) - hs )) -lt 180 ]
+}
+
+mode=$(cat /etc/vpn-mode.state 2>/dev/null)
+
+if ! awg_healthy; then
+    set_blink 200 200        # fast — VPN DOWN / alert
+elif [ "$mode" = "travel" ]; then
+    set_blink 1000 1000      # slow — TRAVEL mode
+else
+    set_solid                # HOME mode (default happy)
+fi
