@@ -1,53 +1,65 @@
-# 🎚 07. Слайдер и LED-индикация
+# 🎚 07. Управление режимами и индикация
 
 ## TL;DR
 
-Beryl AX имеет физический слайдер на корпусе, подключенный к **GPIO-512** с меткой «mode». Тип события — **EV_SW** (switch, не кнопка), код **BTN_0**. Хендлер `/etc/hotplug.d/button/10-vpn-mode` ловит события `pressed` (слайдер влево) → HOME и `released` (слайдер вправо) → TRAVEL. LED `blue:run` на передней панели кодирует три состояния: SOLID = HOME + VPN OK, медленное мигание = TRAVEL + VPN OK, быстрое мигание = VPN down. При загрузке `/etc/init.d/vpn-mode` читает GPIO и применяет соответствующий режим.
+**Универсально (работает везде):** CLI `/usr/bin/vpn-mode {home|travel|toggle|status|detect}` — переключение между режимами одной командой. Работает на любом OpenWrt-роутере.
 
-## Железо Beryl AX с точки зрения Linux
+**Бонусом на Beryl AX:** физический слайдер на корпусе (GPIO-512) автоматически вызывает `vpn-mode home/travel` при переключении. LED `blue:run` показывает состояние.
 
-GL-MT3000 с точки зрения ядра — это набор GPIO-линий, обрабатываемых модулем `gpio_button_hotplug`. Начиная смотреть на живое устройство:
+**На Cudy и других роутерах без слайдера:** CLI остаётся основным способом. Индикация через LED работает автоматически, если найден подходящий — `vpn-led` умеет находить LED самостоятельно.
+
+## Часть 1. Универсальный способ — CLI (работает везде)
+
+### `vpn-mode` — центральная команда
+
+```bash
+vpn-mode home        # включить HOME — split-routing (большинство через VPN, RU-сервисы direct)
+vpn-mode travel      # включить TRAVEL — full tunnel (всё через VPN)
+vpn-mode toggle      # переключить в противоположный
+vpn-mode status      # показать текущий режим
+vpn-mode detect      # прочитать слайдер/GPIO (если есть) и применить
+```
+
+Без физического слайдера можно закрепить желаемый режим навсегда, просто вызвав `vpn-mode home` или `vpn-mode travel` один раз. Настройки сохраняются в UCI и применяются при каждой загрузке.
+
+### Что конкретно делает
+
+`apply_home()` — редактирует секцию `podkop.exclude_ru` так, что в `sing-box` появляется дополнительное route-правило: `russia_outside` + `.ru/.su/.рф/vk.com` → direct-out. Всё остальное → main-out (AWG).
+
+`apply_travel()` — удаляет списки из `podkop.exclude_ru`, делая её неактивной. Остаётся одно правило: **всё от LAN → main-out**. Никаких исключений.
+
+После изменения конфигурации вызывается `podkop reload`, который перечитывает UCI и перегенерирует конфиг sing-box. Процесс занимает 2-3 секунды, трафик в этот момент кратковременно прерывается.
+
+### Автоматическое применение при загрузке
+
+Сервис `/etc/init.d/vpn-mode` запускается с приоритетом `START=99` (после podkop). После 5-секундной задержки вызывает `vpn-mode detect`:
+
+- Если в системе есть GPIO-based слайдер (см. Часть 2) — читает его состояние и применяет соответствующий режим.
+- Если слайдера нет — использует сохранённый в `/etc/vpn-mode.state` (последний явно применённый через CLI).
+
+Это гарантирует корректное состояние после ребута независимо от того, трогал ли кто-то слайдер за время выключения.
+
+## Часть 2. Бонус для Beryl AX — физический слайдер + LED
+
+На корпусе GL.iNet Beryl AX есть двухпозиционный слайдер. GPIO-512 (`label=mode`), тип события — EV_SW (switch), код `BTN_0`.
+
+### Как ядро видит слайдер
 
 ```bash
 cat /sys/kernel/debug/gpio
 ```
 
-вывод:
+вывод (сокращённо):
 ```
-gpiochip0: GPIOs 512-568, parent: platform/11d00000.pinctrl:
- gpio-512 (mode)                in  hi IRQ
- gpio-513 (reset)               in  hi IRQ ACTIVE LOW
- gpio-524 (regulator-usb-vbus)  out hi
- gpio-526 (reset)               out hi ACTIVE LOW
- gpio-540 (regulator-fan-5v)    out hi
- gpio-541 (interrupt)           in  hi IRQ
- gpio-542 (white:system)        out lo ACTIVE LOW
- gpio-543 (blue:run)            out hi ACTIVE LOW
+gpio-512 (mode)                in  hi IRQ
+gpio-513 (reset)               in  hi IRQ ACTIVE LOW
+gpio-542 (white:system)        out lo ACTIVE LOW
+gpio-543 (blue:run)            out hi ACTIVE LOW
 ```
 
-Важные линии:
-- **`gpio-512 mode`** — наш слайдер. Input, IRQ-driven.
-- `gpio-513 reset` — кнопка reset (стандартная OpenWrt handling).
-- **`gpio-542 white:system`** — LED system (боковой).
-- **`gpio-543 blue:run`** — LED run (передняя панель, большой).
+### Hotplug-хендлер
 
-«ACTIVE LOW» — означает, что «логической 1» соответствует **низкий уровень** на GPIO-пине. Для LED это значит: `brightness=1` → пин спускается в low → ток течёт через LED → он светится. Для слайдера — противоположно.
-
-## Слайдер: EV_SW vs кнопка
-
-GPIO-512 может быть настроен как одно из двух:
-- **EV_KEY** — кнопка: генерирует пары `pressed` + `released` при нажатии/отпускании. Короткий pulse.
-- **EV_SW** — переключатель (switch, тумблер): генерирует **одиночное** событие при смене состояния. Стабильное.
-
-В device tree Beryl AX: `gpio-keys/mode` с `linux,input-type = <0x05>` — это **EV_SW** (значение 5 = EV_SW по [include/uapi/linux/input-event-codes.h](https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h)).
-
-Код события — `linux,code = <0x100>` = **256**. Для EV_SW код 256 в OpenWrt-модуле `gpio_button_hotplug` маппится на имя `BTN_0` в переменной `$BUTTON`.
-
-## Хендлер событий
-
-OpenWrt имеет механизм [hotplug.d](https://openwrt.org/docs/guide-user/base-system/hotplug) — скрипты, которые автоматически вызываются при событиях ядра. Для кнопок/переключателей — каталог `/etc/hotplug.d/button/`.
-
-Скрипт `/etc/hotplug.d/button/10-vpn-mode`:
+`/etc/hotplug.d/button/10-vpn-mode`:
 ```sh
 #!/bin/sh
 [ "$BUTTON" = "BTN_0" ] || exit 0
@@ -57,253 +69,144 @@ case "$ACTION" in
 esac
 ```
 
-Переменные окружения, которые прокидывает ядро/хотплаг-демон:
-- `$BUTTON` — имя кнопки (`BTN_0`, `reset`, `wps` и т.п.)
-- `$ACTION` — `pressed`, `released`, или `held`
-- `$SEEN` — сколько секунд прошло с последнего изменения (полезно для загрузочного события)
+ACTION `pressed` / `released` соответствуют двум положениям слайдера. Конкретный маппинг (какая сторона — home) определён эмпирически при калибровке:
 
-Для EV_SW: `pressed` и `released` соответствуют двум физическим положениям. Какое из них «влево», а какое «вправо» — определяется опытным путём при первой калибровке.
-
-**Наша калибровка (Beryl AX GL-MT3000):**
-| Физическое положение слайдера | `$ACTION` | GPIO-512 value | Режим |
+| Физически | ACTION | GPIO | Режим |
 |---|---|---|---|
-| **LEFT** | `pressed` | `hi` (HIGH) | **HOME** |
-| **RIGHT** | `released` | `lo` (LOW) | **TRAVEL** |
+| LEFT | `pressed` | `hi` | HOME |
+| RIGHT | `released` | `lo` | TRAVEL |
 
-## CLI `vpn-mode`
+### LED-индикация
 
-Центральная утилита `/usr/bin/vpn-mode` — управляет переключением:
+LED `blue:run` на передней панели, управляемый `/usr/bin/vpn-led`:
 
-```bash
-vpn-mode home        # применить HOME
-vpn-mode travel      # применить TRAVEL
-vpn-mode detect      # прочитать GPIO, применить соответствующий режим
-vpn-mode toggle      # инвертировать текущий
-vpn-mode status      # показать текущее состояние
-```
-
-Что делает `apply_home()`:
-```sh
-uci set podkop.exclude_ru=section
-uci set podkop.exclude_ru.connection_type='exclusion'
-uci set podkop.exclude_ru.user_domain_list_type='dynamic'
-uci -q delete podkop.exclude_ru.community_lists
-uci add_list podkop.exclude_ru.community_lists='russia_outside'
-uci -q delete podkop.exclude_ru.user_domains
-uci add_list podkop.exclude_ru.user_domains='.ru'
-uci add_list podkop.exclude_ru.user_domains='.su'
-uci add_list podkop.exclude_ru.user_domains='.xn--p1ai'
-uci add_list podkop.exclude_ru.user_domains='vk.com'
-uci commit podkop
-echo home > /etc/vpn-mode.state
-/usr/bin/vpn-led          # обновить индикацию
-# reload_podkop (фоном)
-```
-
-Что делает `apply_travel()`:
-```sh
-uci -q delete podkop.exclude_ru.community_lists
-uci -q delete podkop.exclude_ru.user_domains
-uci -q delete podkop.exclude_ru.user_domain_list_type
-uci commit podkop
-echo travel > /etc/vpn-mode.state
-/usr/bin/vpn-led
-# reload_podkop
-```
-
-После любого apply — `/etc/init.d/podkop reload` перегенерирует sing-box конфиг и перезапускает sing-box. Это занимает ~2-3 секунды; в это время соединения LAN-клиентов прерываются (они переподключаются автоматически).
-
-## Автосинхронизация при загрузке
-
-При включении роутера, UCI-состояние podkop помнит «последний применённый режим». Но физический слайдер мог быть **переключён за время, пока роутер был выключен** — UCI об этом ничего не знает.
-
-`/etc/init.d/vpn-mode` решает это:
-```sh
-#!/bin/sh /etc/rc.common
-START=99                # запускается последним, после podkop
-USE_PROCD=1
-
-boot() { start; }
-
-start_service() {
-    # Подождать пока podkop поднимется, потом выровнять режим
-    ( sleep 5; /usr/bin/vpn-mode detect; /usr/bin/vpn-led ) &
-}
-```
-
-`vpn-mode detect` читает `/sys/kernel/debug/gpio` (парсит строку с `mode`), определяет `hi` или `lo`, вызывает `apply_home` или `apply_travel`. Если текущее состояние в `/etc/vpn-mode.state` уже совпадает — no-op (не триггерит лишний reload).
-
-## LED-индикация
-
-### Три состояния
-
-LED `blue:run` на передней панели Beryl AX — единственный визуальный канал для пользователя.
-
-| Паттерн | Режим | Что означает |
+| Паттерн | Режим | Означает |
 |---|---|---|
-| 🔵 **SOLID** | HOME + VPN OK | Всё хорошо, повседневный режим |
-| 🔵💨 **SLOW BLINK** (1 Гц) | TRAVEL + VPN OK | Полный туннель активен |
+| 🔵 **SOLID** | HOME + VPN OK | Всё в норме |
+| 🔵💨 **SLOW BLINK** (1 Гц) | TRAVEL + VPN OK | Full tunnel |
 | 🔵⚡ **FAST BLINK** (5 Гц) | VPN DOWN | Требует внимания |
 
-Паттерн **быстрого мигания** — это универсальный язык «что-то пошло не так» на сетевом оборудовании (Cisco, Mikrotik, большинство ISP-роутеров). Пользователю не нужно учиться — интуитивно понятно.
+Скрипт вызывается:
+1. **Напрямую** из `vpn-mode home/travel` — мгновенная реакция на переключение.
+2. **Cron-ом** каждые 30 секунд — перечитывает свежесть handshake AWG и корректирует LED.
+3. **Init.d** — при загрузке.
 
-### Как это работает
-
-Linux LED subsystem даёт два способа управления:
-- **Direct brightness**: `echo 1 > /sys/class/leds/<name>/brightness` (solid on), `echo 0 > ...` (off)
-- **Trigger**: `echo timer > /sys/class/leds/<name>/trigger` + `delay_on`/`delay_off` в миллисекундах
-
-Наш скрипт `/usr/bin/vpn-led` в трёх ветках:
-```sh
-LED=/sys/class/leds/blue:run
-
-set_solid() {
-    echo none > "$LED/trigger"
-    echo 1    > "$LED/brightness"
-}
-
-set_blink() {      # $1 = ms on, $2 = ms off
-    echo timer > "$LED/trigger"
-    echo "$1"  > "$LED/delay_on"
-    echo "$2"  > "$LED/delay_off"
-}
-
-if ! awg_healthy; then
-    set_blink 200 200       # fast
-elif [ "$(mode)" = "travel" ]; then
-    set_blink 1000 1000     # slow
-else
-    set_solid               # HOME
-fi
-```
-
-### Когда обновляется
-
-`vpn-led` вызывается в трёх случаях:
-
-1. **При переключении режима** — из `apply_home()` / `apply_travel()`. Мгновенная реакция на слайдер.
-2. **При загрузке** — из `/etc/init.d/vpn-mode` после `detect`.
-3. **В cron каждые 30 секунд** (`* * * * *` + `* * * * * sleep 30 && ...`) — чтобы отслеживать изменение здоровья AWG и перестраивать LED.
-
-### Как измеряется «здоровье AWG»
+### Как определяется «здоровье VPN»
 
 ```sh
-awg_healthy() {
-    local hs
-    hs=$(awg show awg0 latest-handshakes 2>/dev/null | awk '{print $2; exit}')
-    [ -n "$hs" ] && [ "$hs" -gt 0 ] && [ $(( $(date +%s) - hs )) -lt 180 ]
-}
+hs=$(awg show awg0 latest-handshakes | awk '{print $2; exit}')
+# Если hs существует, > 0, и моложе 180 секунд — здоров
+[ $(( $(date +%s) - hs )) -lt 180 ]
 ```
 
-`awg show awg0 latest-handshakes` возвращает UNIX-timestamp последнего handshake'а. Если:
-- Значение есть (peer в принципе существует),
-- Больше 0 (не «никогда»),
-- Moloже 180 секунд (3 минуты с учётом что `PersistentKeepalive=25` даёт handshake ~каждые 25с, — 3 мин это 7+ пропусков, гарантированная проблема)
+180 секунд = 3 минуты. При `PersistentKeepalive=25` в штатной работе handshake обновляется каждые 25 сек — 180 сек означает 7+ пропущенных обновлений, явный сбой.
 
-→ здоров. Иначе — fast blink.
+## Часть 3. На Cudy TR3000 и других роутерах без физического слайдера
 
-## Почему так, а не иначе
+### Переключение режима
 
-### Почему один LED, а не два
-
-Альтернатива: `blue:run` = mode indicator, `white:system` = VPN health. Два независимых канала.
-
-Проблемы:
-1. **Белый LED на Beryl AX плохо виден издалека** — сбоку, маленький. Пользователь привык смотреть на «главный» синий.
-2. **Два мигающих LED** раздражают глаз больше, чем один.
-3. **Сложнее объяснить родственникам:** «если синий светится ровно, но белый мигает — это X, а если ...» → комбинаторный взрыв.
-
-Один LED с тремя паттернами — **проще для пользователя**, достаточно для диагностики.
-
-### Почему SOLID для HOME
-
-**Default happy state = solid light**. 99% времени у пользователей это главный режим. Ровно горит = норма, всё хорошо, игнорировать.
-
-**Любое отклонение** (blink) = сигнал «что-то не как обычно». Пользователь не-айтишник сразу замечает разницу, даже не зная деталей.
-
-### Почему fast-blink для алерта
-
-Быстрое мигание «раздражает» глаз — это эволюционно закреплённое «attention!». Моргающий красный треугольник на приборной панели, моргающая лампочка духовки «пора доставать», моргающий индикатор низкой батареи. Универсальный язык.
-
-Можно было бы: «если VPN упал, выключить LED совсем». Но это двусмысленно: «выключен LED = роутер выключен ИЛИ VPN упал ИЛИ свет перегорел». Мигание — однозначно «что-то сломалось, но роутер жив».
-
-## Расширения
-
-Хотя в базе используется только `blue:run`, есть идеи на будущее:
-
-### WiFi-индикаторы
-
-`mt76-phy0/1` — активность радио. Не трогаем (системное использование).
-
-### USB-LED
-
-Если подключён USB-накопитель — `blue:run` уже занят. Можно задействовать `white:system` как USB-indicator:
-- `white:system` SOLID = USB подключён, готов
-- SLOW BLINK = запись/бэкап в процессе
-
-### Исходящий трафик
-
-Можно через `trigger=netdev` показать активность awg0:
-- Моргает при TX/RX через туннель
-- Не моргает когда пусто
-
-Убирает «статичность» LED, даёт живое ощущение «роутер работает».
-
-## Диагностика
+Слайдера нет — используйте CLI:
 
 ```bash
-# Посмотреть текущее состояние LED
-cat /sys/class/leds/blue:run/trigger
-cat /sys/class/leds/blue:run/brightness
-cat /sys/class/leds/blue:run/delay_on /sys/class/leds/blue:run/delay_off 2>/dev/null
+# Установить режим один раз, навсегда
+vpn-mode home     # или travel
 
-# Вручную потестить паттерны
-/usr/bin/vpn-led               # применить правильный по текущему state
-
-# Принудительно solid
-echo none > /sys/class/leds/blue:run/trigger
-echo 1 > /sys/class/leds/blue:run/brightness
-
-# Принудительно blink
-echo timer > /sys/class/leds/blue:run/trigger
-echo 500 > /sys/class/leds/blue:run/delay_on
-echo 500 > /sys/class/leds/blue:run/delay_off
-
-# Посмотреть что приходит от слайдера
-# (нужно временно повесить debug-хендлер)
-cat > /etc/hotplug.d/button/99-debug << 'EOF'
-logger -t slider-debug "BUTTON=$BUTTON ACTION=$ACTION SEEN=$SEEN"
-EOF
-chmod +x /etc/hotplug.d/button/99-debug
-# подвигать слайдер
-logread -t slider-debug
-# убрать после отладки:
-rm /etc/hotplug.d/button/99-debug
+# Проверить
+vpn-mode status
 ```
+
+Перезагрузка роутера режим **сохранит** (он записан в `/etc/vpn-mode.state`). Hotplug-хендлер в этом случае не срабатывает (нет событий от слайдера) — это нормально.
+
+Если нужно быстро переключать «дома ↔ в поездке», варианты:
+
+**A) SSH-ярлык на ноутбук/телефон:**
+```bash
+alias vpn-home='ssh root@192.168.1.1 vpn-mode home'
+alias vpn-travel='ssh root@192.168.1.1 vpn-mode travel'
+```
+
+**B) Веб-хук + bookmark в браузере** (чуть сложнее). Можно открыть порт на роутере, принимающий запросы на переключение; bookmark-кнопка в браузере делает GET. Реализацию оставляем как домашнее задание.
+
+**C) Автоматическое переключение по Wi-Fi SSID клиента.** Например, ноутбук детектит, что он в незнакомой сети, и через SSH дёргает `vpn-mode travel`. Требует custom-скриптов на клиенте — не включено в этот репозиторий.
+
+### LED-индикация
+
+`/usr/bin/vpn-led` **автоматически** ищет подходящий LED из стандартных имён:
+- `blue:run`, `blue:status`, `green:status`, `white:system`, `green:wlan`, `status`, `power`
+
+На Cudy TR3000 это обычно `green:wlan` или `blue:status` — скрипт найдёт и будет моргать как на Beryl AX.
+
+Посмотреть, какие LED доступны на вашем железе:
+```bash
+ls /sys/class/leds/
+```
+
+Если нужен конкретный LED, переопределите:
+```bash
+# В вашем crontab:
+* * * * * LED_PATH=/sys/class/leds/my-led /usr/bin/vpn-led
+```
+
+Если ни одного пользовательского LED не найдено — скрипт **молча выходит**. Cron не спамит ошибками. Индикация просто отсутствует, но всё остальное работает.
+
+### Как проверить, что всё работает
+
+```bash
+# Применили режим
+vpn-mode travel
+vpn-mode status
+# >>> Saved state: travel ...
+
+# Провоцируем LED-проверку (если LED есть)
+/usr/bin/vpn-led
+# Смотрим, моргает ли
+
+# Определить текущий LED
+for L in /sys/class/leds/*; do
+    name=$(basename "$L")
+    case "$name" in
+        mt76-*|wwan|mmc|mtk*) continue ;;   # пропускаем системные
+    esac
+    echo "available: $name"
+done
+```
+
+## Почему такая архитектура
+
+### Почему CLI универсален, а слайдер — «бонус»
+
+Philosophy: работоспособность **не должна** зависеть от физического железа, доступного только на одной модели. Слайдер добавляет UX на Beryl AX, но система работает и без него. Это позволяет одному репозиторию обслуживать десяток разных роутеров без форков.
+
+### Почему один LED, а не два (как в Beryl AX)
+
+На Beryl AX есть и `blue:run`, и `white:system`. Изначально рассматривался двухцветный сетап (blue=mode, white=health). Отвергнуто:
+- На Cudy/WiFi-точках доступа обычно один пользовательский LED → сценарий «два LED» не переносится.
+- Проще объяснить: «ровно горит = норма, мигает = смотри сюда».
+
+### Почему не использовать несколько LED для большей ясности
+
+Любое добавление — сложность. Один LED с тремя паттернами даёт достаточно информации для not-техников. Два LED → приходится объяснять кодирование состояний. Простота > Информативность для целевой аудитории.
 
 ## Проверь себя
 
-1. **Почему при загрузке роутера 5 секунд задержка перед `vpn-mode detect`?**
-   <details><summary>Ответ</summary>Podkop имеет START=99 (одинаковый с нашим vpn-mode). Если их запускать параллельно, vpn-mode может вызвать `podkop reload` до того, как подkop ещё не закончил начальный старт — race condition, странное состояние. 5 секунд — эмпирическая задержка, чтобы podkop гарантированно «устаканился». Cleaner-решение — зависимость в init.d, но START=99 sleep 5 работает проще.</details>
+1. **Я на Cudy TR3000, слайдера нет. Как мне переключаться между режимами в поездке?**
+   <details><summary>Ответ</summary>
+   CLI через SSH: `ssh root@192.168.1.1 vpn-mode travel`. Или делайте alias в shell-конфиге вашего ноутбука. Если переключать часто не надо — один раз `vpn-mode home` дома, `vpn-mode travel` перед поездкой.
+   </details>
 
-2. **Что будет, если физически убрать слайдер-механизм (заменить, сломать)?**
-   <details><summary>Ответ</summary>GPIO-512 останется в каком-то положении (вероятно, «hi» по умолчанию). Система будет считать что всегда HOME. CLI `vpn-mode travel` всё равно работает вручную. Но физическое переключение станет невозможным. Можно заменить слайдер на подключение к другому источнику (например, внешняя кнопка через GPIO pin).</details>
+2. **У меня роутер вообще без слайдера и без яркого LED. Что я теряю?**
+   <details><summary>Ответ</summary>
+   Только UX-удобство. Вся функциональность (split-routing, AWG, DNS, adblock, killswitch, SSH hardening) работает независимо от физического железа. Вы управляете через CLI, проверяете состояние через `vpn-mode status`, `awg show awg0`, `logread`. Это стандартный Linux-way.
+   </details>
 
-3. **Почему cron каждые 30 секунд, а не 5 или 10?**
-   <details><summary>Ответ</summary>30 секунд — компромисс. Реагировать на сбой VPN быстрее 30 сек излишне (handshake «протухает» только через 180 сек по нашим критериям). Реже чем раз в минуту — медленная диагностика (пользователь уже жалуется, LED ещё не моргает). 30 сек = разумная середина. Плюс `PersistentKeepalive=25` обеспечивает handshake чаще 30 сек в штатной работе — т.е. здоровый counter всегда фреш.</details>
+3. **Как сделать чтобы при `vpn-mode detect` система правильно угадала режим на моей Cudy без GPIO?**
+   <details><summary>Ответ</summary>
+   На Cudy `vpn-mode detect` не найдёт GPIO `mode`, функция `gpio_state()` вернёт пусто, `detected_mode()` вернёт `unknown`, скрипт просто выйдет без изменений (оставит текущее сохранённое в `/etc/vpn-mode.state`). Это правильное поведение: **ничего не ломать, если нет информации**. Режим остаётся тем, который вы выставили через `vpn-mode home/travel` в последний раз.
+   </details>
 
 ## 📚 Глубже изучить
 
-### Обязательно
-- [OpenWrt: Hotplug subsystem](https://openwrt.org/docs/guide-user/base-system/hotplug) — как работают хендлеры
-- [OpenWrt: LEDs configuration](https://openwrt.org/docs/guide-user/base-system/led_configuration) — про LED-subsystem
-- [Linux input-event-codes.h](https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h) — все коды кнопок/переключателей
-
-### Желательно
-- [GPIO interface in sysfs (deprecated, but still present)](https://docs.kernel.org/admin-guide/gpio/sysfs.html) — как работать с GPIO через sysfs
-- [gpio_button_hotplug source (OpenWrt package)](https://github.com/openwrt/openwrt/blob/main/package/kernel/gpio-button-hotplug/src/gpio-button-hotplug.c) — код модуля
-- [Device Tree Spec](https://www.devicetree.org/) — как описывается железо в современном Linux
-
-### Для любопытных
-- 📺 [LED indicators on network equipment: universal design](https://www.youtube.com/results?search_query=network+equipment+LED+design) — поиск по темам UI-дизайна
-- [Nielsen Norman Group: Error message design](https://www.nngroup.com/articles/error-message-guidelines/) — как правильно сигнализировать о проблеме (принципы применимы и к железу)
+- [OpenWrt: LEDs configuration](https://openwrt.org/docs/guide-user/base-system/led_configuration) — как устроен LED-subsystem
+- [OpenWrt: Hotplug](https://openwrt.org/docs/guide-user/base-system/hotplug) — как ядро шлёт события скриптам
+- [Linux GPIO sysfs interface](https://docs.kernel.org/admin-guide/gpio/sysfs.html) — работа с GPIO через файловую систему
+- [Linux input-event-codes.h](https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h) — список кодов кнопок и переключателей

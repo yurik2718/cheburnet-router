@@ -1,21 +1,46 @@
 #!/bin/sh
-# vpn-led — set blue:run LED pattern based on AWG health + current mode
-#   SOLID       = HOME + AWG handshake fresh  (normal happy state)
-#   SLOW BLINK  = TRAVEL + AWG handshake fresh
-#   FAST BLINK  = AWG handshake stale/missing (VPN down, attention needed)
+# vpn-led — управление индикатором состояния VPN (кросс-платформенно).
+#
+# Паттерны:
+#   SOLID       = HOME + AWG handshake свежий (норма)
+#   SLOW BLINK  = TRAVEL + AWG handshake свежий
+#   FAST BLINK  = AWG handshake устарел/отсутствует (VPN down, внимание)
+#
+# Автоматически находит подходящий LED. Если ничего нет — тихо выходит
+# (полезно на роутерах без «пользовательского» LED).
+#
+# Переопределение выбора LED через переменную окружения:
+#   LED_PATH=/sys/class/leds/custom-led /usr/bin/vpn-led
 
-LED=/sys/class/leds/blue:run
-[ -d "$LED" ] || exit 0
+find_led() {
+    # Если задан явно — используем его
+    if [ -n "$LED_PATH" ] && [ -d "$LED_PATH" ]; then
+        echo "$LED_PATH"
+        return 0
+    fi
+    # Иначе ищем среди стандартных кандидатов
+    # Порядок: Beryl AX (blue:run), Cudy (green:wlan), generic (status)
+    for NAME in blue:run blue:status green:status white:system green:wlan status power; do
+        CAND="/sys/class/leds/$NAME"
+        if [ -d "$CAND" ] && [ -f "$CAND/brightness" ]; then
+            echo "$CAND"
+            return 0
+        fi
+    done
+    return 1
+}
+
+LED=$(find_led) || exit 0   # нет LED — тихо выходим, cron не спамит ошибками
 
 set_solid() {
-    echo none > "$LED/trigger"
-    echo 1    > "$LED/brightness"
+    echo none > "$LED/trigger" 2>/dev/null
+    echo 1    > "$LED/brightness" 2>/dev/null
 }
 
 set_blink() {
-    echo timer > "$LED/trigger"
-    echo "$1"  > "$LED/delay_on"
-    echo "$2"  > "$LED/delay_off"
+    echo timer > "$LED/trigger" 2>/dev/null
+    echo "$1"  > "$LED/delay_on" 2>/dev/null
+    echo "$2"  > "$LED/delay_off" 2>/dev/null
 }
 
 awg_healthy() {
@@ -27,9 +52,9 @@ awg_healthy() {
 mode=$(cat /etc/vpn-mode.state 2>/dev/null)
 
 if ! awg_healthy; then
-    set_blink 200 200        # fast — VPN DOWN / alert
+    set_blink 200 200        # fast — VPN DOWN
 elif [ "$mode" = "travel" ]; then
-    set_blink 1000 1000      # slow — TRAVEL mode
+    set_blink 1000 1000      # slow — TRAVEL
 else
-    set_solid                # HOME mode (default happy)
+    set_solid                # HOME (default happy)
 fi
