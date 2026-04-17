@@ -22,7 +22,8 @@
 | **dnsmasq + Quad9 DoH** | Локальный DNS с форвардом в зашифрованный upstream | [docs/05-dns.md](docs/05-dns.md) |
 | **hostapd / wpad-mbedtls** | Wi-Fi AP, WPA2/WPA3-mixed (sae-mixed) | [docs/06-wifi.md](docs/06-wifi.md) |
 | **nftables (fw4)** | Kill switch и общий firewall | [docs/08-killswitch.md](docs/08-killswitch.md) |
-| **gpio_button_hotplug** | Физический слайдер HOME/TRAVEL | [docs/07-hardware.md](docs/07-hardware.md) |
+| **Управление режимами** | CLI `vpn-mode` (универсально для всех роутеров) | [docs/07-modes.md](docs/07-modes.md) |
+| **gpio_button_hotplug** | Физический слайдер HOME/TRAVEL — только Beryl AX | [docs/beryl-ax/slider-led.md](docs/beryl-ax/slider-led.md) |
 
 ## Ключевые файлы на роутере
 

@@ -160,7 +160,8 @@ EOF
 | 🚫 04 | [Блокировка рекламы](docs/04-adblock.md) | adblock-lean, Hagezi Pro, интеграция с dnsmasq |
 | 🔒 05 | [DNS](docs/05-dns.md) | Quad9 DoH, fallback, автофейловер |
 | 📡 06 | [Wi-Fi](docs/06-wifi.md) | WPA3 SAE, PMF, country code, sae-mixed |
-| 🎚 07 | [Слайдер и LED](docs/07-hardware.md) | gpio_button_hotplug, паттерны индикации |
+| 🧭 07 | [Управление режимами](docs/07-modes.md) | HOME/TRAVEL, CLI `vpn-mode`, LED-индикация, aliases |
+| 🎚 07a | [Beryl AX: физ. переключатель](docs/beryl-ax/slider-led.md) | *Только для Beryl AX* — GPIO слайдер, hotplug, маппинг |
 | 🛡 08 | [Kill switch](docs/08-killswitch.md) | Defense-in-depth против утечек |
 | 🔧 09 | [Диагностика](docs/09-troubleshooting.md) | «что-то не работает — куда смотреть» |
 | 🔄 10 | [Обновления и lifecycle](docs/10-upgrades.md) | sysupgrade, apk upgrade, post-upgrade восстановление |
