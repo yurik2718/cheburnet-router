@@ -206,6 +206,61 @@ ip route del 1.1.1.1/32
 - Возможно, NAT у провайдера агрессивный — попробовать 15 сек
 - ISP может throttle'ить UDP — перепроверить endpoint
 
+## Watchdog — автоматическое восстановление
+
+Для удалённого роутера (у родственников), где вы не можете зайти и вручную перезапустить интерфейс при сбое, стоит поставить **watchdog**.
+
+Скрипт `/usr/bin/awg-watchdog` запускается cron'ом каждую минуту и делает:
+
+```
+1. Проверяет что awg0 поднят (ip addr).
+2. Читает возраст последнего handshake'а (awg show awg0 latest-handshakes).
+3. Если handshake старше 180 секунд (3 минуты) → рестартит интерфейс:
+      ifdown awg0 && sleep 2 && ifup awg0
+4. Между перезапусками минимум 120 секунд (не штормить).
+5. Считает счётчик подряд-рестартов (для диагностики).
+```
+
+**Почему 3 минуты?** `PersistentKeepalive=25` → handshake обновляется ~каждые 25 сек. За 3 минуты должно быть 7 успешных handshake'ов. Если их 0 — явно что-то не так, не просто пакет потерялся.
+
+**Почему 2 минуты между рестартами?** Реальный ifdown/ifup занимает 3-5 секунд, handshake после — ещё 2-5. Если сервер на другой стороне действительно сейчас упал, ждать 2 минуты — разумно (а не штурмовать каждую секунду).
+
+**Сценарии, которые решает:**
+
+| Сценарий | Детект через | Что делает watchdog |
+|---|---|---|
+| Сервер AWG перезагружался (5 мин downtime) | handshake age > 180s | ifdown/ifup после 2 мин → новый handshake при живом сервере |
+| ISP глитч (UDP-дропы на 10 мин) | handshake age растёт | пара-тройка безуспешных рестартов, потом handshake восстанавливается сам |
+| Клиентский endpoint-IP сменился (NAT-rotation) | handshake age > 180s | ifdown/ifup инициирует handshake от нового source-IP |
+| Сервер заблокирован РКН навсегда | handshake age растёт бесконечно | watchdog перезапускает каждые 2 мин. LED fast-blink'ом сигнализирует админу. Бесконечный цикл — но стабильный (не падает, не жрёт CPU). |
+
+**Интеграция с LED-индикатором:** `vpn-led` (cron 30 сек) читает тот же handshake. Fast-blink LED = «handshake протух» = проблема виднa пользователю. Watchdog (cron 1 мин) пытается её автоматически исправить. Если исправил — fresh handshake → LED вернётся в solid. Если нет — продолжает мигать, админ замечает.
+
+**Установка:**
+```bash
+# (уже в репо: scripts/awg-watchdog)
+scp scripts/awg-watchdog root@router:/usr/bin/awg-watchdog
+ssh root@router 'chmod +x /usr/bin/awg-watchdog'
+
+# cron entry
+ssh root@router 'crontab -l | grep -v awg-watchdog > /tmp/c; \
+  echo "* * * * * /usr/bin/awg-watchdog" >> /tmp/c; \
+  crontab /tmp/c; /etc/init.d/cron restart'
+```
+
+**Диагностика:**
+```bash
+# История восстановлений
+logread -t awg-watchdog
+
+# Счётчик подряд-неудач (обнуляется при успехе)
+cat /tmp/awg-watchdog/fails
+
+# Когда в последний раз рестартили
+cat /tmp/awg-watchdog/last-restart
+date -d @$(cat /tmp/awg-watchdog/last-restart)
+```
+
 ## Проверь себя
 
 1. **Зачем нужны параметры H1-H4?**

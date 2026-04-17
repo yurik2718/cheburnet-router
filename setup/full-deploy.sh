@@ -46,6 +46,7 @@ scp -q "$REPO_ROOT/scripts/vpn-mode" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/vpn-led" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/dns-provider" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/dns-healthcheck" "$ROUTER":/tmp/scripts/
+scp -q "$REPO_ROOT/scripts/awg-watchdog" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/hotplug/button/10-vpn-mode" "$ROUTER":/tmp/scripts/hotplug/button/
 scp -q "$REPO_ROOT/scripts/init.d/vpn-mode" "$ROUTER":/tmp/scripts/init.d/
 scp -q "$REPO_ROOT/configs/awg0.conf" "$ROUTER":/etc/amnezia/amneziawg/awg0.conf
@@ -54,7 +55,7 @@ echo "✓ файлы скопированы"
 
 # === 2. Поочерёдно запускаем setup-скрипты ===
 for SCRIPT in 00-prerequisites.sh 01-amneziawg.sh 02-podkop.sh 03-adblock.sh \
-              04-dns.sh 06-slider-led.sh 07-killswitch.sh; do
+              04-dns.sh 06-slider-led.sh 07-killswitch.sh 08-watchdog.sh; do
     echo
     echo "=== RUN: setup/$SCRIPT ==="
     ssh "$ROUTER" 'sh -s' < "$REPO_ROOT/setup/$SCRIPT"

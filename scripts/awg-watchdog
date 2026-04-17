@@ -1,0 +1,63 @@
+#!/bin/sh
+# awg-watchdog — мониторинг свежести handshake awg0 и авто-перезапуск интерфейса.
+#
+# Логика:
+#   1. Если awg0 интерфейс вообще не поднят — выйти (это не наша зона).
+#   2. Если handshake свежее HS_MAX_AGE — выйти, всё хорошо, сбросить счётчик неудач.
+#   3. Если handshake устаревший, но с прошлого restart'а прошло < MIN_RESTART_INTERVAL —
+#      подождать (не штормить).
+#   4. Иначе — ifdown awg0 && ifup awg0, увеличить счётчик, логировать.
+#
+# Запускается cron'ом каждую минуту. Ресурсов ест копейки: одна awg show + arithmetic.
+
+IFACE=awg0
+HS_MAX_AGE=180             # сек с handshake'а чтобы считать «протух»
+MIN_RESTART_INTERVAL=120   # не рестартовать чаще
+STATE_DIR=/tmp/awg-watchdog
+mkdir -p "$STATE_DIR"
+
+log() { logger -t awg-watchdog "$*"; }
+
+# Interface up?
+if ! ip -4 addr show "$IFACE" 2>/dev/null | grep -q 'inet '; then
+    # Либо не создан, либо upstream-сервис ещё не поднял — не наш случай
+    exit 0
+fi
+
+# Handshake age
+hs=$(awg show "$IFACE" latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+now=$(date +%s)
+
+if [ -z "$hs" ] || [ "$hs" -eq 0 ]; then
+    age_str="never"
+    stale=1
+else
+    age=$(( now - hs ))
+    age_str="${age}s"
+    [ "$age" -gt "$HS_MAX_AGE" ] && stale=1 || stale=0
+fi
+
+if [ "$stale" -eq 0 ]; then
+    # Всё хорошо — обнулить счётчик
+    echo 0 > "$STATE_DIR/fails" 2>/dev/null
+    exit 0
+fi
+
+# Rate limit: не рестартуем чаще раз в MIN_RESTART_INTERVAL сек
+last_restart=$(cat "$STATE_DIR/last-restart" 2>/dev/null || echo 0)
+since_restart=$(( now - last_restart ))
+if [ "$since_restart" -lt "$MIN_RESTART_INTERVAL" ]; then
+    # Ждём, не рестартуем
+    exit 0
+fi
+
+# Действуем: рестарт интерфейса
+fails=$(cat "$STATE_DIR/fails" 2>/dev/null || echo 0)
+fails=$(( fails + 1 ))
+echo "$fails" > "$STATE_DIR/fails"
+echo "$now"   > "$STATE_DIR/last-restart"
+
+log "handshake age=${age_str} > ${HS_MAX_AGE}s, restart #${fails} для $IFACE"
+ifdown "$IFACE" 2>&1 | logger -t awg-watchdog
+sleep 2
+ifup "$IFACE" 2>&1 | logger -t awg-watchdog

@@ -23,7 +23,7 @@
 - 💡 **LED-индикация** состояния VPN + текущего режима
 - 🛡 **Kill switch**: если VPN упал — трафик блокируется, а не течёт напрямую
 - 📡 **Wi-Fi WPA2/WPA3-mixed** с PMF (Protected Management Frames)
-- ⚙️ **Авто-восстановление**: health-check DNS, weekly reboot, watchdog handshake AWG
+- ⚙️ **Авто-восстановление**: health-check DNS, watchdog handshake AWG (перезапуск интерфейса при протухании рукопожатия)
 
 ## Железо, на котором проверено
 
@@ -87,6 +87,7 @@ cheburnet-router/
 │   ├── vpn-led                      Управление индикатором
 │   ├── dns-provider                 Свитч DNS-провайдера
 │   ├── dns-healthcheck              Автофейловер DoH
+│   ├── awg-watchdog                 Авто-рестарт AWG при протухшем handshake
 │   ├── hotplug/button/10-vpn-mode   Хендлер слайдера
 │   └── init.d/vpn-mode              Синхронизация режима при загрузке
 ├── configs/                     ← шаблоны UCI (без секретов)

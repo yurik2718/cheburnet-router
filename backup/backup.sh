@@ -30,7 +30,7 @@ done
 # === 2. Кастомные скрипты ===
 echo "→ /usr/bin custom scripts"
 mkdir -p "$SNAP/usr-bin"
-for F in vpn-mode vpn-led dns-provider dns-healthcheck; do
+for F in vpn-mode vpn-led dns-provider dns-healthcheck awg-watchdog; do
     ssh "$ROUTER" "cat /usr/bin/$F 2>/dev/null" > "$SNAP/usr-bin/$F" || true
 done
 
