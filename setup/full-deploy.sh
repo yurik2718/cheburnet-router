@@ -41,7 +41,7 @@ fi
 
 # === 1. Копируем скрипты и конфиг на роутер ===
 echo "=== Копируем скрипты на роутер ==="
-ssh "$ROUTER" 'mkdir -p /tmp/scripts/hotplug/button /tmp/scripts/init.d /etc/amnezia/amneziawg'
+ssh "$ROUTER" 'mkdir -p /tmp/scripts/hotplug/button /tmp/scripts/init.d /tmp/configs /etc/amnezia/amneziawg'
 scp -q "$REPO_ROOT/scripts/vpn-mode" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/vpn-led" "$ROUTER":/tmp/scripts/
 scp -q "$REPO_ROOT/scripts/dns-provider" "$ROUTER":/tmp/scripts/
@@ -53,6 +53,7 @@ scp -q "$REPO_ROOT/scripts/hotplug/button/10-vpn-mode" "$ROUTER":/tmp/scripts/ho
 scp -q "$REPO_ROOT/scripts/init.d/vpn-mode" "$ROUTER":/tmp/scripts/init.d/
 scp -q "$REPO_ROOT/configs/awg0.conf" "$ROUTER":/etc/amnezia/amneziawg/awg0.conf
 ssh "$ROUTER" 'chmod 600 /etc/amnezia/amneziawg/awg0.conf'
+scp -q "$REPO_ROOT/configs/sysupgrade.conf" "$ROUTER":/tmp/configs/sysupgrade.conf
 echo "✓ файлы скопированы"
 
 # === 2. Поочерёдно запускаем setup-скрипты ===

@@ -78,6 +78,7 @@ vim configs/wireless.uci.txt
 | 🎚 07 | [Слайдер и LED](docs/07-hardware.md) | gpio_button_hotplug, паттерны индикации |
 | 🛡 08 | [Kill switch](docs/08-killswitch.md) | Defense-in-depth против утечек |
 | 🔧 09 | [Диагностика](docs/09-troubleshooting.md) | «что-то не работает — куда смотреть» |
+| 🔄 10 | [Обновления и lifecycle](docs/10-upgrades.md) | sysupgrade, apk upgrade, post-upgrade восстановление |
 
 ## Структура репозитория
 

@@ -59,6 +59,16 @@ uci set sqm.eth0.linklayer='ethernet'
 uci set sqm.eth0.overhead='18'
 uci commit sqm
 
+# === 4. /etc/sysupgrade.conf — preserve наши кастомные файлы при sysupgrade ===
+echo "→ /etc/sysupgrade.conf (preserve custom files across firmware upgrades)"
+if [ -f /tmp/configs/sysupgrade.conf ]; then
+    cp /tmp/configs/sysupgrade.conf /etc/sysupgrade.conf
+    echo "  установлен, preserve-list:"
+    sysupgrade -l 2>&1 | grep -E "amnezia|vpn-mode|vpn-led|dns-provider|awg-watchdog|log-snapshot|sqm-tune|hotplug.d/button|adblock-lean" | head -10
+else
+    echo "  ⚠ /tmp/configs/sysupgrade.conf отсутствует — preserve-list не обновлён"
+fi
+
 echo
 echo "✓ Quality OK"
 echo
