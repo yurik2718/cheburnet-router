@@ -259,7 +259,7 @@ flowchart LR
 
 ### Шаг 1 — Купить роутер
 
-**Рекомендуется [Cudy TR3000 v1](https://www.cudy.com/collections/wifi-6-router/products/wi-fi-6-ax3000-multi-gigabit-router-tr3000-v1)** (~$40–55): компактный, USB-C 5V (работает от PowerBank), Wi-Fi 6.
+**Рекомендуется Cudy TR3000 v1** (~$40–55): компактный, USB-C 5V (работает от PowerBank), Wi-Fi 6.
 
 > ⚠️ **Серийники `2543...`** (ноябрь 2025+) используют новый flash — нужна OpenWrt 24.10.5+.  
 > ❌ **Не берите** MT7621-роутеры (WR1300, M1300, X6) — мало RAM.
