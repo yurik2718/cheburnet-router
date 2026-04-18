@@ -4,7 +4,7 @@
 
 Два режима: **HOME** (split-routing — основной трафик через VPN, RU-сервисы напрямую) и **TRAVEL** (full-tunnel — всё через VPN без исключений). Переключение через CLI: `vpn-mode home/travel/toggle/status`. Настройки сохраняются в UCI и в `/etc/vpn-mode.state`, применяются при каждой загрузке автоматически.
 
-На моделях с физическим переключателем (**Beryl AX**) режим можно переключать слайдером на корпусе — см. [beryl-ax/slider-led.md](beryl-ax/slider-led.md).
+На роутерах Cudy переключение выполняется через CLI: `vpn-mode home` / `vpn-mode travel`.
 
 ## Два режима — что они делают
 
@@ -165,5 +165,4 @@ ls /sys/class/leds/
 ## 📚 Глубже изучить
 
 - [docs/03-podkop-routing.md](03-podkop-routing.md) — как устроен split-routing на уровне sing-box
-- [beryl-ax/slider-led.md](beryl-ax/slider-led.md) — физический переключатель и LED на Beryl AX (если у вас эта модель)
 - [OpenWrt: hotplug](https://openwrt.org/docs/guide-user/base-system/hotplug) — как работают системные события для кнопок и интерфейсов

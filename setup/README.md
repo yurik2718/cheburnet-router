@@ -20,7 +20,7 @@ scripts                  Что делает                               Вр�
 03-adblock.sh            adblock-lean + Hagezi Pro                 ~2 мин
 04-dns.sh                Quad9 DoH + Cloudflare fallback           ~1 мин
 05-wifi.sh               SSID + WPA2/WPA3 + country code           ~1 мин
-06-slider-led.sh         hotplug-handler, LED, init.d, cron        ~1 мин
+06-slider-led.sh         vpn-mode CLI, vpn-led, init.d, cron        ~1 мин
 07-killswitch.sh         fw4-правила для защиты от утечек          30 сек
 ```
 

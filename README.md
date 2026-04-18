@@ -3,7 +3,7 @@
 > Полная настройка роутера на OpenWrt для приватной и гибкой маршрутизации: VPN-туннель с обфускацией, split-routing по доменам, физический переключатель режимов и многоуровневая защита от утечек. Рабочая сборка, протестированная, задокументированная в образовательных целях.
 
 ![Platform](https://img.shields.io/badge/platform-OpenWrt%2025.12-blue)
-![Hardware](https://img.shields.io/badge/hardware-Beryl%20AX%20%7C%20Cudy%20TR3000-orange)
+![Hardware](https://img.shields.io/badge/hardware-Cudy%20TR3000%20%7C%20WR3000P%20%7C%20AP3000-orange)
 ![VPN](https://img.shields.io/badge/VPN-AmneziaWG%202.0%20%2B%20I1%20CPS-green)
 ![DNS](https://img.shields.io/badge/DNS-Quad9%20DoH%20%2B%20Cloudflare%20failover-9cf)
 ![Adblock](https://img.shields.io/badge/Adblock-Hagezi%20Pro%20198k-red)
@@ -26,7 +26,7 @@
 | **Блокировка рекламы** | ❌ | Мини-список | ✅ **Hagezi Pro — 198 559 доменов** |
 | **Split-routing** | ❌ | Базовый | ✅ **Podkop + sing-box FakeIP, TLD-матчинг** |
 | **Watchdog / self-healing** | ❌ | Минимум | ✅ **AWG watchdog + DNS healthcheck + LED-статус** |
-| **Физический переключатель режимов** | ❌ | Веб-UI | ✅ **Слайдер на корпусе (Beryl AX) + LED-паттерны** |
+| **Физический переключатель режимов** | ❌ | Веб-UI | ✅ **LED-паттерны + CLI `vpn-mode`** (слайдер — только Beryl AX) |
 | **Travel-режим полный** | ❌ | Проприетарно | ✅ **WISP + captive portal + USB tether + MAC rand + profiles** |
 | **Wi-Fi 6 + WPA3-mixed + PMF** | Частично | ✅ | ✅ |
 | **Устойчивость к firmware-апгрейдам** | — | Переустановка с нуля | ✅ **sysupgrade.conf + post-upgrade.sh** |
@@ -165,7 +165,6 @@
 - 📋 **Persistent логи**: ежедневный снапшот в `/root/logs/`, 14 дней
 - 🕐 **Timezone** для читаемых логов
 - 🚦 **SQM (CAKE)** для защиты от bufferbloat (тюнинг под ISP — `sqm-tune`)
-- 💾 **Семейный NAS** через `ksmbd` + USB-диск: воткнули — и все устройства дома видят `\\router\storage`
 
 ## Совместимое железо
 
@@ -217,12 +216,7 @@ Cudy выпускает недорогие роутеры на MediaTek Filogic 
 Оба варианта поддерживают **весь** функционал этой сборки — ставите из одного и того же репозитория.
 
 **Важные моменты при покупке Cudy:**
-- 📅 **Серийники с `2543...` (ноябрь 2025+)** используют новый flash `F50L1G41LC` — нужна **OpenWrt 24.10.5+**, иначе можно окирпичить. [Тред на форуме OpenWrt](https://forum.openwrt.org/t/cudy-started-using-a-new-flash-chip-in-their-ax3000-devices-its-currently-unsupported/243547).
-- 📥 **Первая прошивка OpenWrt** на Cudy требует «interim firmware» с сайта Cudy ставится **перед** самим OpenWrt. Инструкция: [cudy.com/openwrt-software-download](https://www.cudy.com/en-us/blogs/faq/openwrt-software-download).
-- ⚠️ **Избегайте** моделей на MT7621 (WR1300, M1300, X6) — у них 128 MB RAM / 16 MB flash, нашей нагрузки не выдержат.
-
-**Важные моменты при покупке Cudy:**
-- 📅 **Серийные номера с `2543...` (ноябрь 2025+)** используют новый чип flash `F50L1G41LC` — нужна **OpenWrt 24.10.5 или новее**, иначе можно окирпичить. [Тред на форуме OpenWrt](https://forum.openwrt.org/t/cudy-started-using-a-new-flash-chip-in-their-ax3000-devices-its-currently-unsupported/243547).
+- 📅 **Серийники с `2543...` (ноябрь 2025+)** используют новый чип flash `F50L1G41LC` — нужна **OpenWrt 24.10.5+**, иначе можно окирпичить. [Тред на форуме OpenWrt](https://forum.openwrt.org/t/cudy-started-using-a-new-flash-chip-in-their-ax3000-devices-its-currently-unsupported/243547).
 - 📥 **Первая прошивка OpenWrt** на Cudy требует «interim firmware» — специальный signed-образ с сайта Cudy ставится **перед** самим OpenWrt. Инструкция: [cudy.com/openwrt-software-download](https://www.cudy.com/en-us/blogs/faq/openwrt-software-download).
 - ⚠️ **Избегайте** моделей на MT7621 (WR1300, M1300, X6 и т.п.) — у них только 128 MB RAM / 16 MB flash, нашей нагрузки не выдержат.
 
@@ -249,27 +243,109 @@ Cudy выпускает недорогие роутеры на MediaTek Filogic 
 
 На роутерах с 256 MB RAM (Cudy WR3000/M3000) — аналогично, но с меньшим запасом на рост.
 
-## Быстрый старт
+## 🚀 Пошаговая настройка роутера Cudy
 
+```mermaid
+flowchart LR
+    A["🛒 Шаг 1\nКупить роутер"] --> B["📥 Шаг 2\nПрошить OpenWrt"]
+    B --> C["🔑 Шаг 3\nAmneziaWG конфиг"]
+    C --> D["💻 Шаг 4\nКлонировать репо"]
+    D --> E["⚙️ Шаг 5\nНастроить файлы"]
+    E --> F["🚀 Шаг 6\nЗапустить деплой"]
+    F --> G["✅ Шаг 7\nПроверить"]
 ```
+
+---
+
+### Шаг 1 — Купить роутер
+
+**Рекомендуется [Cudy TR3000 v1](https://www.cudy.com/collections/wifi-6-router/products/wi-fi-6-ax3000-multi-gigabit-router-tr3000-v1)** (~$40–55): компактный, USB-C 5V (работает от PowerBank), Wi-Fi 6.
+
+> ⚠️ **Серийники `2543...`** (ноябрь 2025+) используют новый flash — нужна OpenWrt 24.10.5+.  
+> ❌ **Не берите** MT7621-роутеры (WR1300, M1300, X6) — мало RAM.
+
+→ [Полная таблица совместимых Cudy-моделей ↓](#альтернативы-от-cudy-рекомендованные)
+
+---
+
+### Шаг 2 — Прошить OpenWrt
+
+1. Зайдите на **[cudy.com/openwrt-software-download](https://www.cudy.com/en-us/blogs/faq/openwrt-software-download)**
+2. Скачайте **interim firmware** для вашей модели — прошейте через веб-UI Cudy (Firmware Upgrade)
+3. После перезагрузки скачайте **OpenWrt 25.12.2** с [openwrt.org/toh](https://openwrt.org/toh/start) — прошейте снова
+4. Подключитесь по SSH: `ssh root@192.168.1.1`
+
+→ [docs/10-upgrades.md](docs/10-upgrades.md) — детали прошивки и обновлений
+
+---
+
+### Шаг 3 — Получить AmneziaWG конфиг
+
+Нужна **AmneziaWG-подписка** или собственный VPS с AWG-сервером:
+- **Amnezia Premium** → в приложении: Настройки → Экспорт конфигурации → скачайте `.conf`-файл
+- **Свой сервер** → [amnezia.org](https://amnezia.org) — self-hosted за 5 минут
+
+→ [docs/02-amneziawg.md](docs/02-amneziawg.md) — как работает туннель и обфускация
+
+---
+
+### Шаг 4 — Клонировать репозиторий
+
+```bash
 git clone https://github.com/yurik2718/cheburnet-router.git
 cd cheburnet-router
+```
 
-# Положите свой AmneziaWG-конфиг сюда:
+---
+
+### Шаг 5 — Настроить конфигурационные файлы
+
+```bash
+# Ваш AmneziaWG-конфиг
 cp /path/to/your-awg.conf configs/awg0.conf
 
-# Создайте файл с Wi-Fi настройками:
+# Wi-Fi: SSID, пароль, страна
 cat > configs/wireless-actual.txt <<EOF
-WIFI_SSID="YourNetworkName"
-WIFI_KEY="your-strong-password-here"
+WIFI_SSID="МояДомашняяСеть"
+WIFI_KEY="мой-сильный-пароль"
 WIFI_COUNTRY="RU"
 EOF
+```
 
-# Разверните на чистом OpenWrt-роутере:
+Примеры: [`configs/awg0.conf.example`](configs/awg0.conf.example) · [`configs/wireless.uci.example.txt`](configs/wireless.uci.example.txt)
+
+---
+
+### Шаг 6 — Запустить деплой
+
+```bash
 ./setup/full-deploy.sh root@192.168.1.1
 ```
 
-Подробные инструкции — [setup/README.md](setup/README.md).
+**~10–12 минут.** Скрипт автоматически установит VPN, DNS, Wi-Fi, adblock, kill switch, watchdog.
+
+→ [`setup/README.md`](setup/README.md) — что делает каждый из 12 шагов
+
+---
+
+### Шаг 7 — Проверить работу
+
+```bash
+ssh root@192.168.1.1
+
+# Полная диагностика одной командой
+travel-check
+
+# Текущий режим
+vpn-mode status
+```
+
+| Режим | Поведение | Переключение |
+|---|---|---|
+| 🏠 **HOME** | .ru/.su/.xn--p1ai — напрямую, остальное — через VPN | `vpn-mode home` |
+| ✈️ **TRAVEL** | Весь трафик через VPN | `vpn-mode travel` |
+
+→ [docs/commands.md](docs/commands.md) — шпаргалка всех команд · [docs/07-modes.md](docs/07-modes.md) — подробно о режимах
 
 ## Документация
 
@@ -286,7 +362,6 @@ EOF
 | 🔒 05 | [DNS](docs/05-dns.md) | Quad9 DoH, fallback, автофейловер |
 | 📡 06 | [Wi-Fi](docs/06-wifi.md) | WPA3 SAE, PMF, country code, sae-mixed |
 | 🧭 07 | [Управление режимами](docs/07-modes.md) | HOME/TRAVEL, CLI `vpn-mode`, LED-индикация, aliases |
-| 🎚 07a | [Beryl AX: физ. переключатель](docs/beryl-ax/slider-led.md) | *Только для Beryl AX* — GPIO слайдер, hotplug, маппинг |
 | 🛡 08 | [Kill switch](docs/08-killswitch.md) | Defense-in-depth против утечек |
 | 🔧 09 | [Диагностика](docs/09-troubleshooting.md) | «что-то не работает — куда смотреть» |
 | 🔄 10 | [Обновления и lifecycle](docs/10-upgrades.md) | sysupgrade, apk upgrade, post-upgrade восстановление |
@@ -319,7 +394,7 @@ cheburnet-router/
 │   ├── awg-watchdog                 Авто-рестарт AWG при протухшем handshake
 │   ├── log-snapshot                 Ежедневный снапшот логов на flash
 │   ├── sqm-tune                     Включение SQM с правильной скоростью ISP
-│   ├── hotplug/button/10-vpn-mode   Хендлер слайдера
+│   ├── travel-connect/portal/check  Travel-скрипты (WISP, captive portal, диагностика)
 │   └── init.d/vpn-mode              Синхронизация режима при загрузке
 ├── configs/                     ← шаблоны UCI (без секретов)
 ├── setup/                       ← пошаговые install-скрипты
