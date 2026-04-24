@@ -236,7 +236,7 @@ logread | grep -i podkop     # логи маршрутизации
 | 🚫 04 | [Блокировка рекламы](docs/04-adblock.md) | adblock-lean, Hagezi Pro |
 | 🔒 05 | [DNS](docs/05-dns.md) | Quad9 DoH, Cloudflare fallback, автофейловер |
 | 📡 06 | [Wi-Fi](docs/06-wifi.md) | WPA3 SAE, PMF, country code |
-| 🎚 07 | [Управление режимами](docs/07-modes.md) | HOME/TRAVEL, vpn-mode, LED-индикация |
+| 🎚 07 | [Управление режимами](docs/07-modes.md) | HOME/TRAVEL, vpn-mode, физическая кнопка |
 | 🛡 08 | [Kill switch](docs/08-killswitch.md) | Трёхслойная защита от утечек |
 | 🔧 09 | [Диагностика](docs/09-troubleshooting.md) | «что-то не работает — куда смотреть» |
 | 🔄 10 | [Обновления](docs/10-upgrades.md) | sysupgrade, apk upgrade, восстановление |
@@ -253,7 +253,7 @@ logread | grep -i podkop     # логи маршрутизации
 | **Cudy TR3000 v1** ⭐ | ~$40–55 | Travel-форм-фактор, USB-C 5V (PowerBank), 2.5 GbE |
 | Cudy WR3000P v1 | ~$50–65 | 4×GbE LAN + 2.5 GbE WAN, стационарный |
 | Cudy AP3000 v1 | ~$60–75 | 256 MB flash, больше запаса overlay |
-| GL.iNet Beryl AX | ~$110–140 | Физический слайдер HOME/TRAVEL на корпусе |
+| GL.iNet Beryl AX | ~$110–140 | Физический слайдер HOME/TRAVEL + активное охлаждение |
 
 **Все модели** используют MediaTek MT7981 (Filogic) — пакеты AmneziaWG совместимы без изменений.
 

@@ -15,11 +15,6 @@ for SRC in travel-connect travel-portal travel-vpn-on; do
     fi
 done
 
-# Обновлённый vpn-led с поддержкой heartbeat-паттерна для portal-режима
-if [ -f /tmp/scripts/vpn-led ]; then
-    cp /tmp/scripts/vpn-led /usr/bin/vpn-led
-    chmod +x /usr/bin/vpn-led
-fi
 
 echo "✓ travel-mode scripts OK"
 echo

@@ -82,7 +82,6 @@ wifi reload
 # === 9. Применяем режим слайдера ===
 sleep 3
 /usr/bin/vpn-mode detect 2>/dev/null || true
-/usr/bin/vpn-led 2>/dev/null || true
 
 # === 10. Финальная проверка ===
 echo

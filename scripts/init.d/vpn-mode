@@ -1,5 +1,7 @@
 #!/bin/sh /etc/rc.common
-# Apply VPN mode based on slider state on boot (runs after podkop)
+# При загрузке восстанавливает режим VPN.
+# На Beryl AX — читает положение GPIO-слайдера (vpn-mode detect).
+# На Cudy TR3000 и других — применяет последний сохранённый режим из /etc/vpn-mode.state.
 
 START=99
 USE_PROCD=1
@@ -7,6 +9,6 @@ USE_PROCD=1
 boot() { start; }
 
 start_service() {
-    # Give podkop a moment to come up fully, then sync to slider
-    ( sleep 5; /usr/bin/vpn-mode detect; /usr/bin/vpn-led ) &
+    # Ждём podkop, потом синхронизируем режим
+    ( sleep 5; /usr/bin/vpn-mode detect ) &
 }

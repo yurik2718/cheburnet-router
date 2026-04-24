@@ -1,9 +1,14 @@
 #!/bin/sh
-# VPN mode switcher for podkop on GL-MT3000 slider
-# pressed (slider LEFT)  = home   — VPN for all except RU services
-# released (slider RIGHT) = travel — full tunnel, everything via VPN
+# vpn-mode — переключение режима маршрутизации.
 #
-# Usage: vpn-mode {home|travel|detect|status|toggle}
+# HOME   — .ru/.su/.рф напрямую, остальное через VPN
+# TRAVEL — весь трафик через VPN
+#
+# Физическая кнопка (Cudy TR3000, Beryl AX) работает через hotplug:
+#   /etc/hotplug.d/button/10-vpn-mode → вызывает vpn-mode toggle
+# На Beryl AX также читает GPIO при загрузке: vpn-mode detect
+#
+# Usage: vpn-mode {home|travel|detect|toggle|status}
 
 STATE_FILE=/etc/vpn-mode.state
 
@@ -27,7 +32,6 @@ apply_home() {
     uci commit podkop
     echo home > "$STATE_FILE"
     log "mode=HOME applied (VPN for all except RU)"
-    /usr/bin/vpn-led
 }
 
 apply_travel() {
@@ -37,7 +41,6 @@ apply_travel() {
     uci commit podkop
     echo travel > "$STATE_FILE"
     log "mode=TRAVEL applied (full tunnel)"
-    /usr/bin/vpn-led
 }
 
 gpio_state() {
@@ -70,10 +73,10 @@ case "$1" in
     toggle)
         [ "$(current_mode)" = home ] && "$0" travel || "$0" home ;;
     status)
-        echo "Saved state:  $(current_mode || echo unset)"
-        echo "Slider GPIO:  $(gpio_state) -> $(detected_mode)"
-        echo "UCI exclude_ru.community_lists: $(uci -q get podkop.exclude_ru.community_lists || echo '(empty)')"
-        echo "UCI exclude_ru.user_domains:    $(uci -q get podkop.exclude_ru.user_domains || echo '(empty)')" ;;
+        echo "Режим:   $(current_mode || echo 'не задан')"
+        echo "GPIO:    $(gpio_state) -> $(detected_mode) (только Beryl AX)"
+        echo "Домены:  $(uci -q get podkop.exclude_ru.community_lists || echo '(пусто)')"
+        echo "Домены+: $(uci -q get podkop.exclude_ru.user_domains || echo '(пусто)')" ;;
     *)
         echo "Usage: $0 {home|travel|detect|toggle|status}" >&2
         exit 1 ;;

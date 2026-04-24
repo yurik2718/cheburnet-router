@@ -191,21 +191,6 @@ uci commit wireless
 wifi reload
 ```
 
-### «LED не светится / не мигает»
-
-```bash
-# Диагностика LED
-cat /sys/class/leds/blue:run/brightness
-cat /sys/class/leds/blue:run/trigger
-
-# Ручной тест
-echo none > /sys/class/leds/blue:run/trigger
-echo 1 > /sys/class/leds/blue:run/brightness
-# (LED должен зажечься)
-
-# Если вручную работает — vpn-led скрипт проблема
-/usr/bin/vpn-led; echo exit=$?
-```
 
 ## Логи — куда смотреть
 

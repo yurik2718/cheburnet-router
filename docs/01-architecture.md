@@ -118,7 +118,7 @@ flowchart TB
 
 **Компоненты:**
 - `gpio_button_hotplug` → `/etc/hotplug.d/button/10-vpn-mode`
-- CLI `vpn-mode` и `vpn-led`
+- CLI `vpn-mode`
 - `/etc/init.d/vpn-mode` — синхронизация при загрузке
 
 ## Поток трафика: детальный пример

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Hotplug-обработчик физической кнопки/переключателя VPN.
+#
+# GL.iNet Beryl AX:  режим читается из GPIO при загрузке (vpn-mode detect),
+#                    эта кнопка — дополнительный способ переключить через нажатие.
+# Cudy TR3000:       VPN-переключатель на корпусе, нажатие меняет home ↔ travel.
+#
+# ACTION=pressed — нажатие, ACTION=released — отпускание.
+# BUTTON=reset игнорируется: эта кнопка нужна для заводского сброса.
+
+[ "$ACTION" = "pressed" ] || exit 0
+[ "$BUTTON" = "reset" ]   && exit 0
+
+/usr/bin/vpn-mode toggle

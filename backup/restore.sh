@@ -24,7 +24,7 @@ fi
 
 # === 2. Custom scripts ===
 echo "→ custom scripts"
-for F in vpn-mode vpn-led dns-provider dns-healthcheck awg-watchdog log-snapshot sqm-tune \
+for F in vpn-mode dns-provider dns-healthcheck awg-watchdog log-snapshot sqm-tune \
          travel-connect travel-portal travel-vpn-on \
          travel-tether travel-scan travel-wifi travel-mac travel-check; do
     if [ -f "$SNAP/usr-bin/$F" ]; then

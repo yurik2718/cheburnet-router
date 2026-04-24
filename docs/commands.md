@@ -42,10 +42,11 @@ vpn-mode home          # HOME: split-routing (VPN для всего кроме .
 vpn-mode travel        # TRAVEL: full tunnel, всё через VPN
 vpn-mode toggle        # Переключить на противоположный
 vpn-mode status        # Показать текущее
-vpn-mode detect        # Прочитать GPIO слайдера (только Beryl AX)
+vpn-mode detect        # Синхронизировать по GPIO-слайдеру (только Beryl AX)
 ```
 
-**На Beryl AX** — переключается физическим слайдером автоматически. На Cudy — только CLI.
+**Физическая кнопка** (Cudy TR3000, Beryl AX) — переключает режим нажатием автоматически.  
+На других роутерах — только CLI.
 
 ---
 
@@ -266,7 +267,6 @@ logread -f
 
 # По конкретным компонентам
 logread -t vpn-mode                    # Переключения режимов
-logread -t vpn-led                     # Управление LED
 logread -t dns-health                  # Автофейловер DNS
 logread -t dns-provider                # Ручные свитчи DNS
 logread -t awg-watchdog                # Перезапуски AWG

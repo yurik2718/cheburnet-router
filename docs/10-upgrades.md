@@ -41,7 +41,6 @@ OpenWrt **ничего не обновляет автоматически** — 
 ```
 # Наши CLI-скрипты
 /usr/bin/vpn-mode
-/usr/bin/vpn-led
 /usr/bin/dns-provider
 /usr/bin/dns-healthcheck
 /usr/bin/awg-watchdog

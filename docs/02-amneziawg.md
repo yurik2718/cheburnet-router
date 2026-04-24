@@ -314,9 +314,9 @@ ifdown awg0 && ifup awg0
 | Сервер AWG перезагружался (5 мин downtime) | handshake age > 180s | ifdown/ifup после 2 мин → новый handshake при живом сервере |
 | ISP глитч (UDP-дропы на 10 мин) | handshake age растёт | пара-тройка безуспешных рестартов, потом handshake восстанавливается сам |
 | Клиентский endpoint-IP сменился (NAT-rotation) | handshake age > 180s | ifdown/ifup инициирует handshake от нового source-IP |
-| Сервер заблокирован РКН навсегда | handshake age растёт бесконечно | watchdog перезапускает каждые 2 мин. LED fast-blink'ом сигнализирует админу. Бесконечный цикл — но стабильный (не падает, не жрёт CPU). |
+| Сервер заблокирован РКН навсегда | handshake age растёт бесконечно | watchdog перезапускает каждые 2 мин. Бесконечный цикл — но стабильный (не падает, не жрёт CPU). |
 
-**Интеграция с LED-индикатором:** `vpn-led` (cron 30 сек) читает тот же handshake. Fast-blink LED = «handshake протух» = проблема виднa пользователю. Watchdog (cron 1 мин) пытается её автоматически исправить. Если исправил — fresh handshake → LED вернётся в solid. Если нет — продолжает мигать, админ замечает.
+Watchdog (cron 1 мин) пытается автоматически исправить протухший handshake. Диагностика: `logread -t awg-watchdog`.
 
 **Установка:**
 ```bash

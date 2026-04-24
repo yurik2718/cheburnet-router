@@ -30,7 +30,6 @@
 
 ```
 /usr/bin/vpn-mode              # CLI переключения HOME/TRAVEL
-/usr/bin/vpn-led               # Управление индикатором
 /usr/bin/dns-provider          # Ручной свитч DNS (Quad9 <-> Cloudflare)
 /usr/bin/dns-healthcheck       # Автофейловер DNS (крон каждые 30с)
 /etc/hotplug.d/button/10-vpn-mode  # Хендлер слайдера
@@ -60,7 +59,6 @@
 - `sae-mixed` требует `wpad-mbedtls`, а не `wpad-basic-mbedtls` (в ванильном OpenWrt basic).
 - `community_lists='russia_outside'` в секции `exclude_ru` — **НЕ путать** с `russia_inside`. Названия контринтуитивные, см. docs/03.
 - Physical slider: `gpio-512`, `EV_SW`, код `BTN_0`. Mapping: `pressed=LEFT=HOME`, `released=RIGHT=TRAVEL`. GPIO `hi=HOME`, `lo=TRAVEL` (после корректировки).
-- LED `blue:run`: `SOLID=HOME+OK`, `blink 1000ms=TRAVEL+OK`, `blink 200ms=VPN_DOWN`.
 
 ## Стиль документации
 
