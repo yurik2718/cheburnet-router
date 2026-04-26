@@ -78,7 +78,6 @@ travel-connect --off
 1. **Отключает kill switch** (`uci set firewall.@rule[KillSwitch-*].enabled='0'` → fw4 reload). Теперь LAN→WAN direct разрешён.
 2. **Останавливает podkop** (тем самым убирает tproxy-правила). LAN-пакеты идут напрямую через WAN без перехвата.
 3. **Запускает таймер** на N минут (default 15) — по истечении автоматически восстановит VPN.
-4. **Переключает LED на heartbeat-паттерн** (короткая вспышка раз в секунду) — distinctive от всех других состояний, сигнализирует «VPN сознательно выключен».
 
 Пока скрипт активен, лок-файл `/tmp/travel-portal.active` существует.
 
@@ -121,16 +120,17 @@ travel-portal 30    # максимум 60, больше cap'ится
 travel-portal --off # выключить сейчас (= travel-vpn-on)
 ```
 
-## 3. LED-паттерны в TRAVEL-сценарии
+## 3. Как проверить текущее состояние
 
-| Состояние | Паттерн | Что означает |
-|---|---|---|
-| Портал-режим | 💗 Heartbeat (короткая вспышка раз в 1 сек) | VPN выключен **намеренно**, ждём принятия portal |
-| TRAVEL + VPN OK | 💨 Slow blink (1 Гц) | Full tunnel, всё через VPN |
-| HOME + VPN OK | 🟢 Solid | Норма |
-| VPN DOWN | ⚡ Fast blink (5 Гц) | **Ошибка**, VPN не работает |
+Индикатор активного режима — текстовый, через CLI:
 
-Portal-режим отличается от VPN DOWN паттерном: heartbeat вместо частого мигания. Сигнал «намеренное выключение» vs «непредвиденная ошибка». Это важно для пользователя — не надо паниковать.
+```bash
+vpn-mode status          # Режим и применённые UCI-настройки
+travel-check             # Полная картина: WAN, VPN, DNS, adblock
+ls /tmp/travel-portal.active 2>/dev/null && echo "portal ON"
+```
+
+`travel-check` показывает состояние VPN, kill-switch'а, DNS и portal-bypass'а одним экраном — этого достаточно для диагностики без LED-индикации.
 
 ## USB tethering — телефон / 4G-модем как WAN
 

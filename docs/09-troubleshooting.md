@@ -63,10 +63,7 @@ nslookup site-that-broken.com 192.168.1.1
 awg show awg0 | grep handshake
 # Handshake > 3 минут назад → VPN мёртв
 
-# Шаг 3: проверить LED (с глаз)
-# Fast blink → подтверждение что VPN упал
-
-# Шаг 4: тест curl
+# Шаг 3: тест curl
 curl -v --max-time 10 https://site-that-broken.com
 # Часто `Resolving timed out` → DNS-tier; `connection refused` → routing-tier
 ```
@@ -144,7 +141,7 @@ nslookup pagead2.googlesyndication.com 192.168.1.1
 /etc/init.d/dnsmasq restart
 ```
 
-### «Роутер перезагрузился и режим не совпадает со слайдером»
+### «Роутер перезагрузился и режим не совпадает со слайдером» (Beryl AX)
 
 ```bash
 # Debug initial state

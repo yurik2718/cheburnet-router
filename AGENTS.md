@@ -32,7 +32,7 @@
 /usr/bin/vpn-mode              # CLI переключения HOME/TRAVEL
 /usr/bin/dns-provider          # Ручной свитч DNS (Quad9 <-> Cloudflare)
 /usr/bin/dns-healthcheck       # Автофейловер DNS (крон каждые 30с)
-/etc/hotplug.d/button/10-vpn-mode  # Хендлер слайдера
+/etc/hotplug.d/button/10-vpn-mode  # Hotplug-обработчик физической кнопки (Cudy, Beryl AX)
 /etc/init.d/vpn-mode           # Сервис синхронизации при загрузке
 /etc/amnezia/amneziawg/awg0.conf  # AWG конфиг (СЕКРЕТ, не коммитится)
 /etc/config/podkop             # UCI podkop
@@ -58,7 +58,8 @@
 - `fully_routed_ips=192.168.1.0/24` в секции `main` → source-based routing для всего LAN.
 - `sae-mixed` требует `wpad-mbedtls`, а не `wpad-basic-mbedtls` (в ванильном OpenWrt basic).
 - `community_lists='russia_outside'` в секции `exclude_ru` — **НЕ путать** с `russia_inside`. Названия контринтуитивные, см. docs/03.
-- Physical slider: `gpio-512`, `EV_SW`, код `BTN_0`. Mapping: `pressed=LEFT=HOME`, `released=RIGHT=TRAVEL`. GPIO `hi=HOME`, `lo=TRAVEL` (после корректировки).
+- **Beryl AX** physical slider: `gpio-512`, `EV_SW`, код `BTN_0`. Mapping: `pressed=LEFT=HOME`, `released=RIGHT=TRAVEL`. GPIO `hi=HOME`, `lo=TRAVEL` (после корректировки). Slider position читается через `vpn-mode detect` при загрузке системы.
+- **Cudy TR3000** physical button: нажатие вызывает `vpn-mode toggle` через `/etc/hotplug.d/button/10-vpn-mode`. Состояние сохраняется в `/etc/vpn-mode.state`, восстанавливается на boot через `/etc/init.d/vpn-mode`.
 
 ## Стиль документации
 

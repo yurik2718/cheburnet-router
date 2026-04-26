@@ -6,7 +6,6 @@
 #   1. Отключает kill switch rules в fw4
 #   2. Останавливает podkop (убирает tproxy)
 #   3. Запускает таймер автовосстановления (по умолчанию 15 минут)
-#   4. LED переключается на heartbeat-паттерн (distinctly от VPN DOWN)
 #
 # По окончании: либо сам отработает таймер, либо вручную `travel-vpn-on`.
 #
@@ -44,10 +43,7 @@ uci commit firewall
 # 3. Mark active + start timer
 echo "$(date +%s) expires_after=${MINUTES}m" > "$LOCK"
 
-# 4. LED update (heartbeat pattern indicating deliberate bypass)
-/usr/bin/vpn-led > /dev/null 2>&1 || true
-
-# 5. Background timer — auto-restore after N minutes
+# 4. Background timer — auto-restore after N minutes
 (
     sleep $((MINUTES * 60))
     if [ -f "$LOCK" ]; then
@@ -69,8 +65,6 @@ cat <<EOF
     3. Отельный портал перехватит → примите условия
     4. Возобновите VPN: travel-vpn-on
        (или ничего не делайте — восстановится через ${MINUTES} мин)
-
-  LED: "heartbeat" паттерн (короткая вспышка раз в секунду)
 
   ⚠ Пока портал-режим активен, ваш трафик идёт НАПРЯМУЮ
     через отельную сеть. Не логиньтесь в банки/почту/соцсети.

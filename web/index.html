@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>cheburnet-router · настройка</title>
+<style>
+  :root {
+    --bg: #0e1013;
+    --panel: #161a1f;
+    --panel-2: #1d232a;
+    --text: #dfe5ec;
+    --muted: #8a95a3;
+    --accent: #4fa3ff;
+    --accent-hover: #6bb3ff;
+    --ok: #3bc272;
+    --warn: #ffb347;
+    --err: #ff6b6b;
+    --border: #2a313a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 20px 80px; }
+  h1 { font-size: 24px; margin: 0 0 4px 0; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; margin: 24px 0 12px 0; }
+  h3 { font-size: 16px; margin: 16px 0 6px 0; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+  p  { margin: 8px 0; color: var(--muted); }
+  .tagline { color: var(--muted); margin-bottom: 20px; font-size: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin: 16px 0; }
+  .panel h2:first-child, .panel h3:first-child { margin-top: 0; }
+  .edu { background: rgba(79, 163, 255, 0.08); border: 1px solid rgba(79, 163, 255, 0.3); border-radius: 8px; padding: 12px 14px; font-size: 14px; color: #cfe0f5; margin: 12px 0; }
+  label { display: block; margin: 12px 0 4px; font-size: 14px; color: var(--text); }
+  input[type=text], input[type=password], input[type=file], textarea, select {
+    width: 100%; padding: 10px 12px; font-size: 15px;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; outline: none;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  button {
+    padding: 10px 20px; font-size: 15px; cursor: pointer; border-radius: 8px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    font-weight: 500; transition: background 0.1s;
+  }
+  button:hover { background: var(--accent-hover); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  button.ghost:hover { background: var(--panel-2); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .choice { display: flex; gap: 12px; margin: 12px 0; flex-wrap: wrap; }
+  .choice-item {
+    flex: 1 1 280px; padding: 16px; border: 2px solid var(--border); border-radius: 10px;
+    cursor: pointer; transition: border-color 0.1s, background 0.1s;
+    background: var(--panel-2);
+  }
+  .choice-item:hover { border-color: var(--accent); }
+  .choice-item.selected { border-color: var(--accent); background: rgba(79, 163, 255, 0.1); }
+  .choice-item .title { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .choice-item .hint  { font-size: 13px; color: var(--muted); line-height: 1.45; }
+  .choice-item .recommend { display: inline-block; font-size: 11px; padding: 2px 8px; background: var(--ok); color: #fff; border-radius: 4px; margin-left: 8px; vertical-align: middle; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .log {
+    background: #0a0c0f; color: #c0c8d0; border-radius: 8px; padding: 12px; margin: 12px 0;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.45;
+    overflow: auto; max-height: 320px; white-space: pre-wrap; word-break: break-word;
+    border: 1px solid var(--border);
+  }
+  .progress { height: 8px; background: var(--panel-2); border-radius: 6px; overflow: hidden; margin: 12px 0; }
+  .progress .bar { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
+  .progress .bar.done { background: var(--ok); }
+  .progress .bar.err  { background: var(--err); }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 14px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+  .dot-ok  { background: var(--ok); }
+  .dot-err { background: var(--err); }
+  .dot-muted { background: var(--muted); }
+  .err-msg { color: var(--err); background: rgba(255, 107, 107, 0.08); border: 1px solid rgba(255, 107, 107, 0.3); padding: 10px 14px; border-radius: 8px; margin: 8px 0; font-size: 14px; }
+  .ok-msg  { color: var(--ok);  background: rgba(59, 194, 114, 0.08); border: 1px solid rgba(59, 194, 114, 0.3);  padding: 10px 14px; border-radius: 8px; margin: 8px 0; font-size: 14px; }
+  .hidden { display: none !important; }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; background: var(--panel-2); padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>cheburnet-router</h1>
+  <div class="tagline">Образовательный проект — настройка домашнего роутера на OpenWrt с VPN-обфускацией, split-routing'ом и DNS-блокировкой рекламы.</div>
+
+  <div id="edu" class="edu">
+    <strong>О проекте.</strong> Это демонстрация, как работают современные сетевые технологии.
+    VPN-туннели (как AmneziaWG/WireGuard) — стандартная индустриальная технология: применяются в
+    корпоративных сетях, банкинге, межсерверной связи по всему миру. Здесь мы настраиваем их
+    на домашнем роутере для учебных целей.
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран: загрузка -->
+  <!-- ============================================================ -->
+  <div id="scr-loading" class="panel">
+    <h2>Загружаюсь…</h2>
+    <p>Проверяю состояние роутера.</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран 1: выбор режима -->
+  <!-- ============================================================ -->
+  <div id="scr-mode" class="panel hidden">
+    <h2>Шаг 1 из 4 · Выберите способ обхода блокировок</h2>
+
+    <div class="choice">
+      <div class="choice-item" data-mode="vpn">
+        <div class="title">VPN (AmneziaWG) <span class="recommend">рекомендуем</span></div>
+        <div class="hint">
+          Весь трафик шифруется и идёт через VPN-сервер за рубежом. Открывает любые заблокированные сайты (YouTube, Instagram, Telegram). Провайдер видит только зашифрованный поток.
+          <br><br>
+          <strong>Нужен:</strong> платный VPN-сервер (~300–500 руб/мес) — <a href="https://amnezia.org" target="_blank" style="color:var(--accent)">Amnezia VPN</a> или свой VPS с установленным AmneziaWG.
+        </div>
+      </div>
+
+      <div class="choice-item" data-mode="zapret">
+        <div class="title">zapret (обход DPI)</div>
+        <div class="hint">
+          Роутер модифицирует TCP/UDP-пакеты так, что DPI-оборудование провайдера не распознаёт, к какому сайту идёт запрос. Работает полностью локально, без внешнего сервера.
+          <br><br>
+          <strong>Бесплатно</strong>, но: не работает с IP-блокировками (Instagram, Facebook), провайдер по-прежнему видит, какие сайты вы открываете.
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="justify-content: flex-end;">
+      <button id="btn-mode-next" disabled>Дальше →</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран 2: AWG .conf (только VPN) -->
+  <!-- ============================================================ -->
+  <div id="scr-conf" class="panel hidden">
+    <h2>Шаг 2 из 4 · Файл AmneziaWG-конфига</h2>
+    <p>Загрузите <code>.conf</code>-файл от вашего VPN-сервера. В приложении Amnezia: Настройки → Сервер → Поделиться → Экспорт конфигурации.</p>
+
+    <label>Файл .conf:</label>
+    <input type="file" id="inp-conf" accept=".conf,text/plain">
+
+    <p class="muted">Или вставьте содержимое файла вручную:</p>
+    <textarea id="ta-conf" placeholder="[Interface]&#10;Address = 100.84.227.66/32&#10;PrivateKey = ...&#10;Jc = 4&#10;...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ...&#10;..."></textarea>
+
+    <div id="conf-status" class="muted" style="margin-top: 10px;"></div>
+
+    <div class="row" style="justify-content: space-between;">
+      <button class="ghost" onclick="goto('mode')">← Назад</button>
+      <button id="btn-conf-next" disabled>Дальше →</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран 3: Wi-Fi -->
+  <!-- ============================================================ -->
+  <div id="scr-wifi" class="panel hidden">
+    <h2 id="wifi-title">Шаг 3 из 4 · Wi-Fi</h2>
+    <p>Все устройства, подключённые к этой Wi-Fi-сети, автоматически получат настройки — ничего не нужно настраивать на каждом телефоне/ноутбуке.</p>
+
+    <label>Название сети (SSID):</label>
+    <input type="text" id="inp-ssid" maxlength="32" placeholder="MyHome">
+
+    <label>Пароль (8+ символов):</label>
+    <input type="password" id="inp-pass" placeholder="минимум 8 символов">
+
+    <label>Код страны:</label>
+    <select id="inp-country">
+      <option value="RU" selected>RU — Россия</option>
+      <option value="BY">BY — Беларусь</option>
+      <option value="KZ">KZ — Казахстан</option>
+      <option value="AM">AM — Армения</option>
+      <option value="GE">GE — Грузия</option>
+      <option value="US">US — США</option>
+      <option value="DE">DE — Германия</option>
+      <option value="TR">TR — Турция</option>
+    </select>
+
+    <div class="row" style="justify-content: space-between;">
+      <button class="ghost" id="btn-wifi-back">← Назад</button>
+      <button id="btn-wifi-next" disabled>Дальше →</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран 4: подтверждение -->
+  <!-- ============================================================ -->
+  <div id="scr-confirm" class="panel hidden">
+    <h2 id="confirm-title">Шаг 4 из 4 · Подтверждение</h2>
+    <dl class="kv" id="confirm-summary"></dl>
+
+    <div class="edu" style="margin-top: 16px;">
+      Установка займёт 8–12 минут. Роутер скачает и настроит VPN, sing-box, adblock-lean, DNS и остальные компоненты. Вы будете видеть прогресс в реальном времени.
+    </div>
+
+    <div class="row" style="justify-content: space-between;">
+      <button class="ghost" id="btn-confirm-back">← Назад</button>
+      <button id="btn-confirm-install">Начать установку</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран установки -->
+  <!-- ============================================================ -->
+  <div id="scr-install" class="panel hidden">
+    <h2>Установка</h2>
+    <div id="install-step" class="muted">подготовка…</div>
+    <div class="progress"><div id="install-bar" class="bar" style="width: 5%;"></div></div>
+    <pre id="install-log" class="log"></pre>
+    <div class="row" style="justify-content: space-between;">
+      <span class="muted" id="install-hint">Не закрывайте страницу до окончания.</span>
+      <button class="ghost hidden" id="btn-install-cancel">Отменить</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран успеха (после установки) -->
+  <!-- ============================================================ -->
+  <div id="scr-success" class="panel hidden">
+    <div class="ok-msg"><strong>✓ Установка завершена!</strong></div>
+    <p>Подключитесь к Wi-Fi с вашим новым SSID и проверьте работу:</p>
+    <ul>
+      <li>Откройте <a href="https://speedtest.yandex.ru" target="_blank" style="color:var(--accent)">speedtest.yandex.ru</a> — российский сервис, должен работать напрямую</li>
+      <li>Откройте <a href="https://speedtest.net" target="_blank" style="color:var(--accent)">speedtest.net</a> — заблокирован в РФ, откроется только если обход работает</li>
+    </ul>
+    <div class="row">
+      <button onclick="goto('mgmt')">К управлению →</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран: управление (после установки) -->
+  <!-- ============================================================ -->
+  <div id="scr-mgmt" class="panel hidden">
+    <h2>Состояние и управление</h2>
+
+    <h3>Статус</h3>
+    <dl class="kv" id="mgmt-status"></dl>
+
+    <h3 id="mgmt-mode-header" class="hidden">Режим маршрутизации</h3>
+    <div id="mgmt-mode" class="row hidden">
+      <button id="btn-home" class="ghost">🏠 HOME (.ru напрямую + остальное через VPN)</button>
+      <button id="btn-travel" class="ghost">✈️ TRAVEL (всё через VPN)</button>
+    </div>
+
+    <h3>Перезапустить сервис</h3>
+    <div class="row">
+      <button id="btn-svc-vpn"     class="ghost">VPN</button>
+      <button id="btn-svc-zapret"  class="ghost">zapret</button>
+      <button id="btn-svc-dns"     class="ghost">DNS</button>
+      <button id="btn-svc-adblock" class="ghost">Adblock</button>
+    </div>
+
+    <div id="mgmt-msg" class="hidden"></div>
+
+    <p class="muted" style="margin-top: 24px;">
+      Расширенная диагностика через SSH: <code>ssh root@ROUTER_IP travel-check</code>
+    </p>
+  </div>
+
+</div>
+
+<script>
+// =====================================================================
+// RPC client: ubus JSON-RPC через /ubus
+// =====================================================================
+const UBUS_URL = "/ubus";
+const SESSION  = "00000000000000000000000000000000"; // unauth session (ACL даёт нужные права)
+
+let rpcId = 1;
+async function rpc(object, method, args) {
+    const body = {
+        jsonrpc: "2.0",
+        id: rpcId++,
+        method: "call",
+        params: [SESSION, object, method, args || {}]
+    };
+    const res = await fetch(UBUS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.error) throw new Error(`ubus error: ${JSON.stringify(json.error)}`);
+    // ubus возвращает [code, data]; code=0 → ok
+    const [code, data] = json.result;
+    if (code !== 0) throw new Error(`ubus code ${code}`);
+    return data || {};
+}
+
+// =====================================================================
+// Навигация между экранами
+// =====================================================================
+const SCREENS = ["loading", "mode", "conf", "wifi", "confirm", "install", "success", "mgmt"];
+function goto(name) {
+    SCREENS.forEach(s => document.getElementById("scr-" + s).classList.toggle("hidden", s !== name));
+    document.getElementById("edu").classList.toggle("hidden", name === "mgmt");
+    window.scrollTo(0, 0);
+}
+
+// =====================================================================
+// Состояние wizard
+// =====================================================================
+const state = {
+    mode: null,
+    awgConf: "",
+    ssid: "",
+    wifiKey: "",
+    country: "RU"
+};
+
+// =====================================================================
+// Инициализация — проверить, настроен ли уже роутер
+// =====================================================================
+async function init() {
+    try {
+        const st = await rpc("cheburnet", "get_status");
+        // Если установка в процессе — сразу на экран установки
+        if (st.installing) { goto("install"); pollProgress(); return; }
+        // Если уже установлено — на management
+        if (st.install_type !== "none") { goto("mgmt"); renderMgmt(st); return; }
+        // Иначе wizard
+        goto("mode");
+    } catch (e) {
+        document.getElementById("scr-loading").innerHTML =
+            `<h2>Не получилось соединиться с роутером</h2>
+             <div class="err-msg"><strong>${e.message}</strong></div>
+             <p class="muted">Возможные причины:</p>
+             <ul class="muted">
+               <li>ubus не запущен или не поднят RPC-модуль</li>
+               <li>уhttpd-mod-ubus не установлен</li>
+               <li>bootstrap.sh не завершился успешно</li>
+             </ul>
+             <p>Запустите в SSH на роутере: <code>ubus list cheburnet</code>. Если ничего не возвращает — повторите bootstrap.sh.</p>`;
+    }
+}
+
+// =====================================================================
+// Экран 1 — выбор режима
+// =====================================================================
+document.querySelectorAll("#scr-mode .choice-item").forEach(el => {
+    el.addEventListener("click", () => {
+        document.querySelectorAll("#scr-mode .choice-item").forEach(e => e.classList.remove("selected"));
+        el.classList.add("selected");
+        state.mode = el.dataset.mode;
+        document.getElementById("btn-mode-next").disabled = false;
+    });
+});
+document.getElementById("btn-mode-next").onclick = () => {
+    if (state.mode === "vpn") goto("conf");
+    else { state.awgConf = ""; goto("wifi"); updateWifiTitle(); }
+};
+
+// =====================================================================
+// Экран 2 — AWG .conf
+// =====================================================================
+const taConf = document.getElementById("ta-conf");
+const inpConf = document.getElementById("inp-conf");
+const confStatus = document.getElementById("conf-status");
+
+function validateConf(txt) {
+    if (!txt) return { ok: false, msg: "Пусто — загрузите файл или вставьте текст." };
+    if (!txt.includes("[Interface]")) return { ok: false, msg: "Нет секции [Interface]." };
+    if (!txt.match(/PrivateKey\s*=/)) return { ok: false, msg: "Нет PrivateKey." };
+    if (!txt.includes("[Peer]")) return { ok: false, msg: "Нет секции [Peer]." };
+    if (!txt.match(/Endpoint\s*=/)) return { ok: false, msg: "Нет Endpoint в [Peer]." };
+    return { ok: true, msg: "✓ Конфиг валиден." };
+}
+
+function refreshConfValidation() {
+    const v = validateConf(taConf.value.trim());
+    confStatus.innerHTML = v.ok
+        ? `<span style="color:var(--ok)">${v.msg}</span>`
+        : `<span style="color:var(--warn)">${v.msg}</span>`;
+    document.getElementById("btn-conf-next").disabled = !v.ok;
+}
+
+taConf.addEventListener("input", refreshConfValidation);
+inpConf.addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => { taConf.value = ev.target.result; refreshConfValidation(); };
+    reader.readAsText(file);
+});
+document.getElementById("btn-conf-next").onclick = () => {
+    state.awgConf = taConf.value.trim();
+    goto("wifi");
+    updateWifiTitle();
+};
+
+// =====================================================================
+// Экран 3 — Wi-Fi
+// =====================================================================
+function updateWifiTitle() {
+    const total = state.mode === "vpn" ? 4 : 3;
+    const cur   = state.mode === "vpn" ? 3 : 2;
+    document.getElementById("wifi-title").textContent = `Шаг ${cur} из ${total} · Wi-Fi`;
+}
+const inpSsid = document.getElementById("inp-ssid");
+const inpPass = document.getElementById("inp-pass");
+const inpCountry = document.getElementById("inp-country");
+
+function refreshWifiValidation() {
+    const ok = inpSsid.value.trim().length >= 1 && inpSsid.value.length <= 32 && inpPass.value.length >= 8;
+    document.getElementById("btn-wifi-next").disabled = !ok;
+}
+inpSsid.addEventListener("input", refreshWifiValidation);
+inpPass.addEventListener("input", refreshWifiValidation);
+
+document.getElementById("btn-wifi-back").onclick = () => {
+    if (state.mode === "vpn") goto("conf"); else goto("mode");
+};
+document.getElementById("btn-wifi-next").onclick = () => {
+    state.ssid    = inpSsid.value.trim();
+    state.wifiKey = inpPass.value;
+    state.country = inpCountry.value;
+    renderConfirm();
+    goto("confirm");
+};
+
+// =====================================================================
+// Экран 4 — подтверждение
+// =====================================================================
+function renderConfirm() {
+    const total = state.mode === "vpn" ? 4 : 3;
+    document.getElementById("confirm-title").textContent = `Шаг ${total} из ${total} · Подтверждение`;
+    const s = document.getElementById("confirm-summary");
+    const rows = [
+        ["Режим",      state.mode === "vpn" ? "VPN (AmneziaWG + podkop + split-routing)" : "zapret (DPI-обход без внешнего сервера)"],
+        ["Wi-Fi",      `${state.ssid} · WPA2/WPA3-mixed · страна ${state.country}`],
+    ];
+    if (state.mode === "vpn") {
+        rows.push(["AWG-конфиг", `${state.awgConf.split("\n").length} строк, подготовлен`]);
+    }
+    rows.push(["Adblock",       "Hagezi Pro (~200 000 доменов)"]);
+    rows.push(["DNS",           "Quad9 DoH + Cloudflare fallback"]);
+    s.innerHTML = rows.map(([k, v]) => `<dt>${k}:</dt><dd>${escapeHtml(v)}</dd>`).join("");
+}
+
+document.getElementById("btn-confirm-back").onclick = () => goto("wifi");
+document.getElementById("btn-confirm-install").onclick = startInstall;
+
+// =====================================================================
+// Запуск установки
+// =====================================================================
+async function startInstall() {
+    goto("install");
+    document.getElementById("install-step").textContent = "отправляю конфиг на роутер…";
+    document.getElementById("install-log").textContent = "";
+    try {
+        await rpc("cheburnet", "install_start", {
+            mode:     state.mode,
+            ssid:     state.ssid,
+            wifi_key: state.wifiKey,
+            country:  state.country,
+            awg_conf: state.awgConf
+        });
+        pollProgress();
+    } catch (e) {
+        document.getElementById("install-step").innerHTML = `<span class="err-msg">${e.message}</span>`;
+    }
+}
+
+// Названия шагов → примерный процент прогресса
+const STEP_PCT = {
+    "starting": 3, "00-prerequisites": 7,
+    "01-amneziawg": 18, "02-podkop": 35, "03-adblock": 48,
+    "04-dns": 55, "04-dns-zapret": 55, "05-wifi": 65,
+    "06-vpn-mode": 72, "07-killswitch": 76, "08-watchdog": 80,
+    "09-ssh-hardening": 83, "10-quality": 88, "11-travel": 92,
+    "12-travel-plus": 96, "13-zapret": 90, "done": 100
+};
+
+async function pollProgress() {
+    try {
+        const p = await rpc("cheburnet", "install_progress");
+        const stepRaw = (p.step || "").replace(/^\[STEP\] |\[|\]/g, "");
+        document.getElementById("install-step").textContent = "текущий шаг: " + stepRaw;
+        document.getElementById("install-log").textContent  = p.log || "";
+        const bar = document.getElementById("install-bar");
+        let pct = STEP_PCT[stepRaw] || 50;
+        bar.style.width = pct + "%";
+        // автопрокрутка лога вниз
+        const lg = document.getElementById("install-log");
+        lg.scrollTop = lg.scrollHeight;
+
+        if (p.done) {
+            if (p.result === "ok") {
+                bar.classList.add("done"); bar.style.width = "100%";
+                setTimeout(() => goto("success"), 1200);
+            } else {
+                bar.classList.add("err");
+                document.getElementById("install-step").innerHTML =
+                    `<span class="err-msg">Установка не удалась: ${p.result}. Полный лог выше — скопируйте его и откройте issue на GitHub.</span>`;
+                document.getElementById("install-hint").classList.add("hidden");
+            }
+            return;
+        }
+        setTimeout(pollProgress, 2500);
+    } catch (e) {
+        // Сеть моргнула — подождём и попробуем снова
+        setTimeout(pollProgress, 4000);
+    }
+}
+
+// =====================================================================
+// Management screen
+// =====================================================================
+async function renderMgmt(st) {
+    if (!st) st = await rpc("cheburnet", "get_status");
+
+    const up  = (b) => b ? `<span class="dot dot-ok"></span>работает` : `<span class="dot dot-err"></span>не работает`;
+    const muted = (txt) => `<span class="dot dot-muted"></span>${txt}`;
+
+    const rows = [];
+    rows.push(["Тип установки", st.install_type === "vpn" ? "VPN (AmneziaWG + podkop)"
+                                  : st.install_type === "zapret" ? "zapret (DPI-обход)"
+                                  : "не установлено"]);
+    if (st.install_type === "vpn") {
+        rows.push(["Режим", st.mode || "не задан"]);
+        rows.push(["AmneziaWG tunnel", st.awg_handshake_age === null ? muted("нет handshake")
+                        : st.awg_handshake_age < 180 ? `<span class="dot dot-ok"></span>handshake ${st.awg_handshake_age}s назад`
+                        : `<span class="dot dot-err"></span>handshake ${st.awg_handshake_age}s назад (протух, рестартуйте VPN)`]);
+        rows.push(["podkop + sing-box", up(st.podkop_up)]);
+    }
+    if (st.install_type === "zapret") {
+        rows.push(["zapret (nfqws)", up(st.zapret_up)]);
+    }
+    rows.push(["DNS (DoH)",        up(st.doh_up || st.podkop_up)]);
+    rows.push(["Adblock-lean",     up(st.adblock_up)]);
+    rows.push(["Wi-Fi SSID",       st.ssid || "(не задан)"]);
+
+    document.getElementById("mgmt-status").innerHTML =
+        rows.map(([k, v]) => `<dt>${k}:</dt><dd>${v}</dd>`).join("");
+
+    // Переключение режима — только для VPN
+    const showMode = st.install_type === "vpn";
+    document.getElementById("mgmt-mode-header").classList.toggle("hidden", !showMode);
+    document.getElementById("mgmt-mode").classList.toggle("hidden", !showMode);
+}
+
+async function mgmtCall(object, method, args, label) {
+    const msg = document.getElementById("mgmt-msg");
+    msg.className = "muted";
+    msg.classList.remove("hidden");
+    msg.textContent = `Выполняю: ${label}…`;
+    try {
+        const r = await rpc(object, method, args);
+        msg.className = "ok-msg";
+        msg.textContent = `${label}: ${JSON.stringify(r)}`;
+        setTimeout(() => renderMgmt(), 1500);
+    } catch (e) {
+        msg.className = "err-msg";
+        msg.textContent = `${label} — ошибка: ${e.message}`;
+    }
+}
+
+document.getElementById("btn-home").onclick    = () => mgmtCall("cheburnet", "mode_switch",    { mode: "home" },    "Переключение в HOME");
+document.getElementById("btn-travel").onclick  = () => mgmtCall("cheburnet", "mode_switch",    { mode: "travel" },  "Переключение в TRAVEL");
+document.getElementById("btn-svc-vpn").onclick     = () => mgmtCall("cheburnet", "service_restart", { service: "vpn" },     "Перезапуск VPN");
+document.getElementById("btn-svc-zapret").onclick  = () => mgmtCall("cheburnet", "service_restart", { service: "zapret" },  "Перезапуск zapret");
+document.getElementById("btn-svc-dns").onclick     = () => mgmtCall("cheburnet", "service_restart", { service: "dns" },     "Перезапуск DNS");
+document.getElementById("btn-svc-adblock").onclick = () => mgmtCall("cheburnet", "service_restart", { service: "adblock" }, "Перезагрузка adblock");
+
+// =====================================================================
+// Утилиты
+// =====================================================================
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+init();
+</script>
+</body>
+</html>

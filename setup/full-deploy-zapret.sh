@@ -25,16 +25,21 @@ if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$ROUTER" 'echo ok' >/dev/null 2>&
     exit 1
 fi
 
-# === Копируем скрипты ===
-echo "=== Копируем скрипты на роутер ==="
-ssh "$ROUTER" 'mkdir -p /tmp/scripts /tmp/configs'
-scp -q "$REPO_ROOT/scripts/dns-provider"    "$ROUTER":/tmp/scripts/
-scp -q "$REPO_ROOT/scripts/dns-healthcheck" "$ROUTER":/tmp/scripts/
+# === Копируем служебные файлы ===
+# В zapret-режиме dns-provider/dns-healthcheck не нужны — они управляют
+# podkop'ом, которого здесь нет. DoH обеспечивает https-dns-proxy через
+# 04-dns-zapret.sh (с автофейловером между Quad9 и Cloudflare через dnsmasq).
+echo "=== Копируем служебные файлы на роутер ==="
+ssh "$ROUTER" 'mkdir -p /tmp/configs'
 scp -q "$REPO_ROOT/configs/sysupgrade.conf" "$ROUTER":/tmp/configs/
 echo "✓ файлы скопированы"
 
 # === Запускаем базовые скрипты ===
-for SCRIPT in 00-prerequisites.sh 03-adblock.sh 04-dns.sh 09-ssh-hardening.sh; do
+# 00 — apk update + базовые тулзы
+# 03 — adblock-lean + Hagezi Pro
+# 04-dns-zapret — https-dns-proxy (Quad9 DoH + Cloudflare fallback)
+# 09 — SSH hardening (key-only, REJECT SSH с WAN)
+for SCRIPT in 00-prerequisites.sh 03-adblock.sh 04-dns-zapret.sh; do
     echo
     echo "=== RUN: setup/$SCRIPT ==="
     ssh "$ROUTER" 'sh -s' < "$REPO_ROOT/setup/$SCRIPT"
@@ -59,7 +64,8 @@ echo "=== ФИНАЛЬНЫЙ СТАТУС ==="
 ssh "$ROUTER" \
     'echo "--- zapret ---"; /etc/init.d/zapret status 2>&1 | head -5; \
      echo "--- adblock ---"; /etc/init.d/adblock-lean status 2>&1 | head -3; \
-     echo "--- DNS ---"; /usr/bin/dns-provider status 2>/dev/null || echo "dns-provider не установлен"; \
+     echo "--- DoH (https-dns-proxy) ---"; /etc/init.d/https-dns-proxy status 2>&1 | head -3; \
+     echo "  инстансы: $(pgrep https-dns-proxy | wc -l) (ожидается 2: Quad9 + Cloudflare)"; \
      echo "--- uptime ---"; uptime'
 
 echo

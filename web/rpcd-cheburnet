@@ -1,0 +1,300 @@
+#!/bin/sh
+# rpcd-cheburnet — ubus-RPC handler для веб-мастера cheburnet-router.
+# Ставится в /usr/libexec/rpcd/cheburnet и автоматически подхватывается rpcd.
+#
+# Методы:
+#   get_status         — состояние системы (режим, установлен ли VPN/zapret, handshake AWG, running-сервисы)
+#   install_start      — запустить установку (mode, ssid, wifi_key, country, awg_conf?)
+#   install_progress   — текущий шаг + последние 5000 байт логов + done-флаг
+#   install_cancel     — пометить установку как отменённую (реально не убивает процесс)
+#   mode_switch        — переключить HOME/TRAVEL (только после установки VPN)
+#   service_restart    — перезапустить сервис (vpn | zapret | dns | adblock)
+#
+# Протокол rpcd: скрипт вызывается с аргументами `list` или `call <method>`.
+# В режиме `call` аргументы метода читаются из stdin как JSON.
+
+INSTALL_DIR="/opt/cheburnet"
+STATE_DIR="/tmp/cheburnet"
+LOG_FILE="$STATE_DIR/install.log"
+STATE_FILE="$STATE_DIR/state"
+DONE_FILE="$STATE_DIR/done"
+PID_FILE="$STATE_DIR/pid"
+
+mkdir -p "$STATE_DIR"
+
+# === Вспомогательные функции ===
+# Экранирование произвольной строки для безопасной вставки в JSON-литерал.
+# Делает: \ → \\, " → \", переносы строк → \n, tab → \t.
+# Используется ВЕЗДЕ где пользовательские/uci-данные подставляются в JSON-ответ.
+json_escape() {
+    printf '%s' "$1" | awk 'BEGIN{ORS=""}
+        {
+            gsub(/\\/, "\\\\");
+            gsub(/"/, "\\\"");
+            gsub(/\t/, "\\t");
+            gsub(/\r/, "");
+            if (NR > 1) printf "\\n";
+            print
+        }'
+}
+
+# === list: описание доступных методов ===
+if [ "$1" = "list" ]; then
+    cat <<'EOF'
+{
+    "get_status": {},
+    "install_start": {
+        "mode": "str",
+        "ssid": "str",
+        "wifi_key": "str",
+        "country": "str",
+        "awg_conf": "str"
+    },
+    "install_progress": {},
+    "install_cancel": {},
+    "mode_switch": { "mode": "str" },
+    "service_restart": { "service": "str" }
+}
+EOF
+    exit 0
+fi
+
+# === call: вызов метода ===
+if [ "$1" != "call" ]; then
+    echo '{"error":"unknown action"}' >&2
+    exit 1
+fi
+
+METHOD="$2"
+INPUT=$(cat)
+
+# jsonfilter helper — возвращает пустую строку при отсутствии поля
+jf() {
+    echo "$INPUT" | jsonfilter -e "$1" 2>/dev/null || true
+}
+
+case "$METHOD" in
+
+    # ------------------------------------------------------------------
+    get_status)
+        MODE=$(cat /etc/vpn-mode.state 2>/dev/null || echo "unknown")
+
+        # Определяем тип установки
+        INSTALL_TYPE="none"
+        if [ -f /etc/amnezia/amneziawg/awg0.conf ] && [ -x /etc/init.d/podkop ]; then
+            INSTALL_TYPE="vpn"
+        elif [ -x /etc/init.d/zapret ]; then
+            INSTALL_TYPE="zapret"
+        fi
+
+        # Установка в процессе?
+        INSTALLING="false"
+        [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null && INSTALLING="true"
+
+        # Сервисы running?
+        ADBLOCK_UP="false"
+        /etc/init.d/adblock-lean status 2>&1 | grep -qi running && ADBLOCK_UP="true"
+
+        PODKOP_UP="false"
+        /etc/init.d/sing-box status 2>&1 | grep -qi running && PODKOP_UP="true"
+
+        ZAPRET_UP="false"
+        pgrep -f nfqws >/dev/null 2>&1 && ZAPRET_UP="true"
+
+        DOH_UP="false"
+        pgrep https-dns-proxy >/dev/null 2>&1 && DOH_UP="true"
+
+        # AWG handshake age
+        AWG_HS_AGE="null"
+        HS=$(awg show awg0 latest-handshakes 2>/dev/null | awk '{print $2}')
+        if [ -n "$HS" ] && [ "$HS" -gt 0 ]; then
+            AWG_HS_AGE=$(( $(date +%s) - HS ))
+        fi
+
+        # Wi-Fi SSID — пропускаем через JSON-escape (может содержать ", \, и т.д.)
+        SSID_RAW=$(uci -q get wireless.default_radio0.ssid || echo "")
+        SSID=$(json_escape "$SSID_RAW")
+        MODE_ESC=$(json_escape "$MODE")
+
+        cat <<EOF
+{
+    "install_type": "$INSTALL_TYPE",
+    "installing": $INSTALLING,
+    "mode": "$MODE_ESC",
+    "ssid": "$SSID",
+    "adblock_up": $ADBLOCK_UP,
+    "podkop_up": $PODKOP_UP,
+    "zapret_up": $ZAPRET_UP,
+    "doh_up": $DOH_UP,
+    "awg_handshake_age": $AWG_HS_AGE
+}
+EOF
+        ;;
+
+    # ------------------------------------------------------------------
+    install_start)
+        # Проверяем, не идёт ли уже установка
+        if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+            echo '{"error": "installation already running", "pid": '"$(cat "$PID_FILE")"'}'
+            exit 0
+        fi
+
+        MODE=$(jf '@.mode')
+        SSID=$(jf '@.ssid')
+        WIFI_KEY=$(jf '@.wifi_key')
+        COUNTRY=$(jf '@.country')
+        AWG_CONF=$(jf '@.awg_conf')
+
+        # Валидация
+        case "$MODE" in
+            vpn|zapret) ;;
+            *) echo '{"error": "mode must be vpn or zapret"}'; exit 0 ;;
+        esac
+        [ -z "$SSID" ]     && { echo '{"error": "ssid required"}'; exit 0; }
+        [ -z "$WIFI_KEY" ] && { echo '{"error": "wifi_key required"}'; exit 0; }
+        [ "${#WIFI_KEY}" -lt 8 ] && { echo '{"error": "wifi_key must be >= 8 chars"}'; exit 0; }
+        [ -z "$COUNTRY" ]  && COUNTRY="RU"
+
+        if [ "$MODE" = "vpn" ]; then
+            [ -z "$AWG_CONF" ] && { echo '{"error": "awg_conf required for vpn mode"}'; exit 0; }
+            echo "$AWG_CONF" | grep -q '\[Interface\]' || { echo '{"error": "awg_conf does not contain [Interface] section"}'; exit 0; }
+            echo "$AWG_CONF" | grep -q 'PrivateKey'    || { echo '{"error": "awg_conf does not contain PrivateKey"}'; exit 0; }
+            echo "$AWG_CONF" | grep -q '\[Peer\]'      || { echo '{"error": "awg_conf does not contain [Peer] section"}'; exit 0; }
+
+            # Сохраняем .conf для 01-amneziawg.sh
+            mkdir -p /etc/amnezia/amneziawg
+            printf '%s\n' "$AWG_CONF" > /etc/amnezia/amneziawg/awg0.conf
+            chmod 600 /etc/amnezia/amneziawg/awg0.conf
+        fi
+
+        # Сохраняем Wi-Fi-параметры для 05-wifi.sh
+        cat > "$INSTALL_DIR/configs/wireless-actual.txt" <<EOF
+WIFI_SSID="$SSID"
+WIFI_KEY="$WIFI_KEY"
+WIFI_COUNTRY="$COUNTRY"
+EOF
+        chmod 600 "$INSTALL_DIR/configs/wireless-actual.txt"
+
+        # Чистим старые артефакты
+        rm -f "$DONE_FILE" "$LOG_FILE" "$STATE_FILE"
+        echo "starting" > "$STATE_FILE"
+
+        # setsid создаёт новую process-group (PGID=PID), чтобы install_cancel
+        # мог убить весь дочерний дерево через kill -- -PID.
+        nohup setsid "$INSTALL_DIR/run-install.sh" "$MODE" \
+            > "$LOG_FILE" 2>&1 &
+        PID=$!
+        echo "$PID" > "$PID_FILE"
+
+        echo "{\"status\": \"started\", \"pid\": $PID, \"mode\": \"$MODE\"}"
+        ;;
+
+    # ------------------------------------------------------------------
+    install_progress)
+        # Текущий шаг
+        STEP_RAW=$(cat "$STATE_FILE" 2>/dev/null || echo "idle")
+        STEP=$(json_escape "$STEP_RAW")
+
+        # Процесс жив?
+        RUNNING="false"
+        if [ -f "$PID_FILE" ]; then
+            kill -0 "$(cat "$PID_FILE")" 2>/dev/null && RUNNING="true"
+        fi
+
+        # Установка завершилась?
+        DONE="false"
+        RESULT="unknown"
+        if [ -f "$DONE_FILE" ]; then
+            DONE="true"
+            RESULT=$(json_escape "$(cat "$DONE_FILE")")
+        elif [ "$RUNNING" = "false" ] && [ -f "$LOG_FILE" ]; then
+            # Процесс уже не живой, но done-маркер не записан →
+            # orchestrator упал/был убит. Сообщаем UI как ошибку.
+            DONE="true"
+            RESULT="crashed"
+        fi
+
+        # Последние 5000 байт лога с JSON-escape
+        LOG_RAW=$(tail -c 5000 "$LOG_FILE" 2>/dev/null || echo "")
+        LOG=$(json_escape "$LOG_RAW")
+
+        cat <<EOF
+{
+    "step": "$STEP",
+    "running": $RUNNING,
+    "done": $DONE,
+    "result": "$RESULT",
+    "log": "$LOG"
+}
+EOF
+        ;;
+
+    # ------------------------------------------------------------------
+    install_cancel)
+        if [ -f "$PID_FILE" ]; then
+            PID=$(cat "$PID_FILE")
+            kill "$PID" 2>/dev/null || true
+            # kill всей process-группы (в fork'ах могут висеть apk/wget)
+            kill -- -"$PID" 2>/dev/null || true
+            echo "cancelled" > "$DONE_FILE"
+            echo '{"status": "cancelled"}'
+        else
+            echo '{"status": "not_running"}'
+        fi
+        ;;
+
+    # ------------------------------------------------------------------
+    mode_switch)
+        NEW_MODE=$(jf '@.mode')
+        case "$NEW_MODE" in
+            home|travel) ;;
+            *) echo '{"error": "mode must be home or travel"}'; exit 0 ;;
+        esac
+
+        if [ ! -x /usr/bin/vpn-mode ]; then
+            echo '{"error": "vpn-mode CLI not installed — установите VPN-режим"}'
+            exit 0
+        fi
+
+        OUT=$(/usr/bin/vpn-mode "$NEW_MODE" 2>&1) || {
+            echo "{\"error\": \"vpn-mode $NEW_MODE failed\", \"output\": \"$(echo "$OUT" | tr '\n' ' ')\"}"
+            exit 0
+        }
+        echo "{\"status\": \"ok\", \"mode\": \"$NEW_MODE\"}"
+        ;;
+
+    # ------------------------------------------------------------------
+    service_restart)
+        SVC=$(jf '@.service')
+        case "$SVC" in
+            vpn)
+                # Полный рестарт VPN-стека
+                ifdown awg0 2>/dev/null; sleep 1; ifup awg0 2>/dev/null
+                /etc/init.d/podkop restart >/dev/null 2>&1 &
+                echo '{"status": "vpn restarting"}'
+                ;;
+            zapret)
+                /etc/init.d/zapret restart >/dev/null 2>&1
+                echo '{"status": "zapret restarted"}'
+                ;;
+            dns)
+                /etc/init.d/dnsmasq restart >/dev/null 2>&1
+                /etc/init.d/https-dns-proxy restart >/dev/null 2>&1 || true
+                echo '{"status": "dns restarted"}'
+                ;;
+            adblock)
+                /etc/init.d/adblock-lean start >/dev/null 2>&1
+                /etc/init.d/dnsmasq restart >/dev/null 2>&1
+                echo '{"status": "adblock reloaded"}'
+                ;;
+            *)
+                echo '{"error": "unknown service"}'
+                ;;
+        esac
+        ;;
+
+    # ------------------------------------------------------------------
+    *)
+        echo '{"error": "unknown method"}'
+        ;;
+esac

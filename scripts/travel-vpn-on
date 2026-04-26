@@ -27,9 +27,6 @@ sleep 6
 # 3. Drop lock
 rm -f "$LOCK"
 
-# 4. LED обновить (вернётся в solid/slow-blink согласно текущему режиму)
-/usr/bin/vpn-led > /dev/null 2>&1 || true
-
 echo
 echo "✓ VPN восстановлен"
 /usr/bin/vpn-mode status

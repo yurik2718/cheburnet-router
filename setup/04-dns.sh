@@ -1,8 +1,9 @@
 #!/bin/sh
-# 04-dns.sh — настроить Quad9 DoH + Cloudflare fallback + автофейловер.
+# 04-dns.sh — настроить Quad9 DoH через podkop/sing-box.
+# При недоступности Quad9 sing-box сам падает на bootstrap_dns (1.1.1.1).
 set -e
 
-echo "== 04. DNS (Quad9 DoH + failover) =="
+echo "== 04. DNS (Quad9 DoH) =="
 
 # === 1. UCI podkop DNS ===
 uci set podkop.settings.dns_type='doh'
@@ -10,32 +11,20 @@ uci set podkop.settings.dns_server='dns.quad9.net/dns-query'
 uci set podkop.settings.bootstrap_dns_server='1.1.1.1'
 uci commit podkop
 
-# === 2. Копируем скрипты (vpn-mode и dns-* должны быть в scripts/) ===
-# Эти скрипты предполагаются скопированными через scp или через full-deploy.sh
-for SRC in dns-provider dns-healthcheck; do
-    if [ -f /tmp/scripts/$SRC ]; then
-        cp /tmp/scripts/$SRC /usr/bin/$SRC
-        chmod +x /usr/bin/$SRC
-        echo "→ установлен /usr/bin/$SRC"
-    else
-        echo "⚠ /tmp/scripts/$SRC не найден — скопируйте вручную"
-    fi
-done
+# === 2. Копируем dns-provider (используется vpn-mode для отображения статуса) ===
+if [ -f /tmp/scripts/dns-provider ]; then
+    cp /tmp/scripts/dns-provider /usr/bin/dns-provider
+    chmod +x /usr/bin/dns-provider
+    echo "→ установлен /usr/bin/dns-provider"
+else
+    echo "⚠ /tmp/scripts/dns-provider не найден"
+fi
 
-# === 3. Cron для health-check ===
-echo "→ настраиваем cron для авто-фейловера"
-crontab -l 2>/dev/null | grep -v dns-healthcheck > /tmp/cron.tmp
-echo "* * * * * /usr/bin/dns-healthcheck" >> /tmp/cron.tmp
-echo "* * * * * sleep 30 && /usr/bin/dns-healthcheck" >> /tmp/cron.tmp
-crontab /tmp/cron.tmp
-rm /tmp/cron.tmp
-/etc/init.d/cron restart >/dev/null
-
-# === 4. Reload podkop для применения нового DNS ===
+# === 3. Reload podkop для применения нового DNS ===
 /etc/init.d/podkop reload >/dev/null 2>&1 &
 sleep 8
 
-# === 5. Проверка ===
+# === 4. Проверка ===
 if /usr/bin/dns-provider status 2>/dev/null | grep -q Quad9; then
     echo "✓ Quad9 DoH активен"
 else
