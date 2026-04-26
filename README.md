@@ -1,6 +1,14 @@
-# cheburnet-router
+<div align="center">
 
-> Одна из самых тщательно собранных конфигураций OpenWrt для домашнего и travel-использования: AmneziaWG-обфускация против DPI, трёхслойная защита от утечек, умная маршрутизация, блокировка рекламы на роутере — и всё это настраивается одной командой через браузер.
+# 🔐 cheburnet-router
+
+# САМАЯ ПРОДУМАННАЯ СБОРКА OpenWrt<br>С АВТОМАТИЗИРОВАННОЙ НАСТРОЙКОЙ
+
+### Открыл браузер → ввёл пароль Wi-Fi → всё работает
+
+*AmneziaWG 2.0 с обфускацией · Трёхслойный kill switch · Умная маршрутизация · 200k+ доменов в блоклисте*
+
+<br>
 
 ![Platform](https://img.shields.io/badge/platform-OpenWrt%2025.12-blue)
 ![Hardware](https://img.shields.io/badge/hardware-Cudy%20TR3000%20%7C%20GL.iNet%20Beryl%20AX-orange)
@@ -9,6 +17,14 @@
 ![Adblock](https://img.shields.io/badge/Adblock-Hagezi%20Pro%20200k%2B-red)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Docs](https://img.shields.io/badge/docs-18000%2B%20слов-purple)
+
+<br>
+
+**[Быстрый старт ↓](#быстрый-старт--веб-мастер)** · **[Почему лучшая ↓](#почему-это-лучшая-сборка--честно)** · **[Документация ↓](#документация)**
+
+</div>
+
+---
 
 > **⚠️ Для VPN-режима нужен платный VPN-сервер или свой VPS.** Бесплатная альтернатива без сервера — режим **zapret** (обход DPI-фильтрации).
 
