@@ -1,0 +1,22 @@
+#!/bin/sh
+# conntrack-monitor — мониторинг заполненности таблицы conntrack.
+#
+# Запускается каждые 15 минут через cron. Логирует заполненность.
+# При >80% — предупреждение. При >95% — принудительный сброс таблицы
+# (conntrack -F), чтобы избежать полного переполнения и падения скорости VPN.
+#
+# Симптом переполнения: скорость VPN падает в 10–100 раз без потери связи.
+# Лечение вручную: conntrack -F && logread -e conntrack
+
+max=$(cat /proc/sys/net/netfilter/nf_conntrack_max)
+cur=$(cat /proc/sys/net/netfilter/nf_conntrack_count)
+pct=$(( cur * 100 / max ))
+
+if [ "$pct" -ge 95 ]; then
+    logger -t conntrack-monitor "CRITICAL: ${cur}/${max} (${pct}%) — flush"
+    conntrack -F 2>/dev/null || true
+elif [ "$pct" -ge 80 ]; then
+    logger -t conntrack-monitor "WARN: ${cur}/${max} (${pct}%) — high, check traffic"
+else
+    logger -t conntrack-monitor "OK: ${cur}/${max} (${pct}%)"
+fi

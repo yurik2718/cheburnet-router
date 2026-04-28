@@ -1,0 +1,23 @@
+#!/bin/sh
+# conntrack-tune — оптимальные тайм-ауты conntrack для VPN-шлюза.
+#
+# Проблема: стандартные OpenWRT-тайм-ауты (~7440s TCP, ~180s UDP-stream) позволяют
+# таблице накапливать десятки тысяч «мёртвых» соединений за 2 недели работы.
+# При переполнении (nf_conntrack_count → nf_conntrack_max) новые пакеты дропаются,
+# скорость VPN падает в 10–100 раз. Перезагрузка лечит — таблица чистится.
+#
+# Решение: уменьшаем тайм-ауты. Записи стареют быстрее, таблица не переполняется.
+#
+# Запускается при первичной настройке (setup/10-quality.sh) и при каждой загрузке
+# через @reboot cron — перекрывает значения из /etc/sysctl.d/11-nf-conntrack.conf.
+
+sysctl -qw net.netfilter.nf_conntrack_tcp_timeout_established=3600
+sysctl -qw net.netfilter.nf_conntrack_tcp_timeout_close_wait=60
+sysctl -qw net.netfilter.nf_conntrack_tcp_timeout_fin_wait=60
+sysctl -qw net.netfilter.nf_conntrack_tcp_timeout_time_wait=30
+sysctl -qw net.netfilter.nf_conntrack_udp_timeout_stream=60
+
+max=$(cat /proc/sys/net/netfilter/nf_conntrack_max)
+cur=$(cat /proc/sys/net/netfilter/nf_conntrack_count)
+pct=$(( cur * 100 / max ))
+logger -t conntrack-tune "applied: tcp_est=3600s udp_stream=60s | fill=${cur}/${max} (${pct}%)"
