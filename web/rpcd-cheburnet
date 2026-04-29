@@ -3,12 +3,12 @@
 # Ставится в /usr/libexec/rpcd/cheburnet и автоматически подхватывается rpcd.
 #
 # Методы:
-#   get_status         — состояние системы (режим, установлен ли VPN/zapret, handshake AWG, running-сервисы)
-#   install_start      — запустить установку (mode, ssid, wifi_key, country, awg_conf?)
+#   get_status         — состояние системы (режим, установлен ли VPN, handshake AWG, running-сервисы)
+#   install_start      — запустить установку (ssid, wifi_key, country, awg_conf)
 #   install_progress   — текущий шаг + последние 5000 байт логов + done-флаг
 #   install_cancel     — пометить установку как отменённую (реально не убивает процесс)
-#   mode_switch        — переключить HOME/TRAVEL (только после установки VPN)
-#   service_restart    — перезапустить сервис (vpn | zapret | dns | adblock)
+#   mode_switch        — переключить HOME/TRAVEL
+#   service_restart    — перезапустить сервис (vpn | dns | adblock)
 #
 # Протокол rpcd: скрипт вызывается с аргументами `list` или `call <method>`.
 # В режиме `call` аргументы метода читаются из stdin как JSON.
@@ -44,7 +44,6 @@ if [ "$1" = "list" ]; then
 {
     "get_status": {},
     "install_start": {
-        "mode": "str",
         "ssid": "str",
         "wifi_key": "str",
         "country": "str",
@@ -83,8 +82,6 @@ case "$METHOD" in
         INSTALL_TYPE="none"
         if [ -f /etc/amnezia/amneziawg/awg0.conf ] && [ -x /etc/init.d/podkop ]; then
             INSTALL_TYPE="vpn"
-        elif [ -x /etc/init.d/zapret ]; then
-            INSTALL_TYPE="zapret"
         fi
 
         # Установка в процессе?
@@ -97,12 +94,6 @@ case "$METHOD" in
 
         PODKOP_UP="false"
         /etc/init.d/sing-box status 2>&1 | grep -qi running && PODKOP_UP="true"
-
-        ZAPRET_UP="false"
-        pgrep -f nfqws >/dev/null 2>&1 && ZAPRET_UP="true"
-
-        DOH_UP="false"
-        pgrep https-dns-proxy >/dev/null 2>&1 && DOH_UP="true"
 
         # AWG handshake age
         AWG_HS_AGE="null"
@@ -124,8 +115,6 @@ case "$METHOD" in
     "ssid": "$SSID",
     "adblock_up": $ADBLOCK_UP,
     "podkop_up": $PODKOP_UP,
-    "zapret_up": $ZAPRET_UP,
-    "doh_up": $DOH_UP,
     "awg_handshake_age": $AWG_HS_AGE
 }
 EOF
@@ -139,33 +128,26 @@ EOF
             exit 0
         fi
 
-        MODE=$(jf '@.mode')
         SSID=$(jf '@.ssid')
         WIFI_KEY=$(jf '@.wifi_key')
         COUNTRY=$(jf '@.country')
         AWG_CONF=$(jf '@.awg_conf')
 
         # Валидация
-        case "$MODE" in
-            vpn|zapret) ;;
-            *) echo '{"error": "mode must be vpn or zapret"}'; exit 0 ;;
-        esac
         [ -z "$SSID" ]     && { echo '{"error": "ssid required"}'; exit 0; }
         [ -z "$WIFI_KEY" ] && { echo '{"error": "wifi_key required"}'; exit 0; }
         [ "${#WIFI_KEY}" -lt 8 ] && { echo '{"error": "wifi_key must be >= 8 chars"}'; exit 0; }
         [ -z "$COUNTRY" ]  && COUNTRY="RU"
 
-        if [ "$MODE" = "vpn" ]; then
-            [ -z "$AWG_CONF" ] && { echo '{"error": "awg_conf required for vpn mode"}'; exit 0; }
-            echo "$AWG_CONF" | grep -q '\[Interface\]' || { echo '{"error": "awg_conf does not contain [Interface] section"}'; exit 0; }
-            echo "$AWG_CONF" | grep -q 'PrivateKey'    || { echo '{"error": "awg_conf does not contain PrivateKey"}'; exit 0; }
-            echo "$AWG_CONF" | grep -q '\[Peer\]'      || { echo '{"error": "awg_conf does not contain [Peer] section"}'; exit 0; }
+        [ -z "$AWG_CONF" ] && { echo '{"error": "awg_conf required"}'; exit 0; }
+        echo "$AWG_CONF" | grep -q '\[Interface\]' || { echo '{"error": "awg_conf does not contain [Interface] section"}'; exit 0; }
+        echo "$AWG_CONF" | grep -q 'PrivateKey'    || { echo '{"error": "awg_conf does not contain PrivateKey"}'; exit 0; }
+        echo "$AWG_CONF" | grep -q '\[Peer\]'      || { echo '{"error": "awg_conf does not contain [Peer] section"}'; exit 0; }
 
-            # Сохраняем .conf для 01-amneziawg.sh
-            mkdir -p /etc/amnezia/amneziawg
-            printf '%s\n' "$AWG_CONF" > /etc/amnezia/amneziawg/awg0.conf
-            chmod 600 /etc/amnezia/amneziawg/awg0.conf
-        fi
+        # Сохраняем .conf для 01-amneziawg.sh
+        mkdir -p /etc/amnezia/amneziawg
+        printf '%s\n' "$AWG_CONF" > /etc/amnezia/amneziawg/awg0.conf
+        chmod 600 /etc/amnezia/amneziawg/awg0.conf
 
         # Сохраняем Wi-Fi-параметры для 05-wifi.sh
         cat > "$INSTALL_DIR/configs/wireless-actual.txt" <<EOF
@@ -181,12 +163,12 @@ EOF
 
         # setsid создаёт новую process-group (PGID=PID), чтобы install_cancel
         # мог убить весь дочерний дерево через kill -- -PID.
-        nohup setsid "$INSTALL_DIR/run-install.sh" "$MODE" \
+        nohup setsid "$INSTALL_DIR/run-install.sh" \
             > "$LOG_FILE" 2>&1 &
         PID=$!
         echo "$PID" > "$PID_FILE"
 
-        echo "{\"status\": \"started\", \"pid\": $PID, \"mode\": \"$MODE\"}"
+        echo "{\"status\": \"started\", \"pid\": $PID}"
         ;;
 
     # ------------------------------------------------------------------
@@ -273,13 +255,8 @@ EOF
                 /etc/init.d/podkop restart >/dev/null 2>&1 &
                 echo '{"status": "vpn restarting"}'
                 ;;
-            zapret)
-                /etc/init.d/zapret restart >/dev/null 2>&1
-                echo '{"status": "zapret restarted"}'
-                ;;
             dns)
                 /etc/init.d/dnsmasq restart >/dev/null 2>&1
-                /etc/init.d/https-dns-proxy restart >/dev/null 2>&1 || true
                 echo '{"status": "dns restarted"}'
                 ;;
             adblock)

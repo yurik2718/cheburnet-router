@@ -91,11 +91,11 @@
 <body>
 <div class="wrap">
   <h1>cheburnet-router</h1>
-  <div class="tagline">Образовательный проект — настройка домашнего роутера на OpenWrt с VPN-обфускацией, split-routing'ом и DNS-блокировкой рекламы.</div>
+  <div class="tagline">Образовательный OpenWrt-стенд — AmneziaWG, split-routing, DoH, kill switch.</div>
 
   <div id="edu" class="edu">
-    <strong>О проекте.</strong> Это демонстрация, как работают современные сетевые технологии.
-    VPN-туннели (как AmneziaWG/WireGuard) — стандартная индустриальная технология: применяются в
+    <strong>О проекте.</strong> Это демонстрация современных сетевых технологий.
+    VPN-туннели (AmneziaWG/WireGuard) — стандартная индустриальная технология: применяются в
     корпоративных сетях, банкинге, межсерверной связи по всему миру. Здесь мы настраиваем их
     на домашнем роутере для учебных целей.
   </div>
@@ -109,42 +109,11 @@
   </div>
 
   <!-- ============================================================ -->
-  <!-- Экран 1: выбор режима -->
-  <!-- ============================================================ -->
-  <div id="scr-mode" class="panel hidden">
-    <h2>Шаг 1 из 4 · Выберите способ обхода блокировок</h2>
-
-    <div class="choice">
-      <div class="choice-item" data-mode="vpn">
-        <div class="title">VPN (AmneziaWG) <span class="recommend">рекомендуем</span></div>
-        <div class="hint">
-          Весь трафик шифруется и идёт через VPN-сервер за рубежом. Открывает любые заблокированные сайты (YouTube, Instagram, Telegram). Провайдер видит только зашифрованный поток.
-          <br><br>
-          <strong>Нужен:</strong> платный VPN-сервер (~300–500 руб/мес) — <a href="https://amnezia.org" target="_blank" style="color:var(--accent)">Amnezia VPN</a> или свой VPS с установленным AmneziaWG.
-        </div>
-      </div>
-
-      <div class="choice-item" data-mode="zapret">
-        <div class="title">zapret (обход DPI)</div>
-        <div class="hint">
-          Роутер модифицирует TCP/UDP-пакеты так, что DPI-оборудование провайдера не распознаёт, к какому сайту идёт запрос. Работает полностью локально, без внешнего сервера.
-          <br><br>
-          <strong>Бесплатно</strong>, но: не работает с IP-блокировками (Instagram, Facebook), провайдер по-прежнему видит, какие сайты вы открываете.
-        </div>
-      </div>
-    </div>
-
-    <div class="row" style="justify-content: flex-end;">
-      <button id="btn-mode-next" disabled>Дальше →</button>
-    </div>
-  </div>
-
-  <!-- ============================================================ -->
-  <!-- Экран 2: AWG .conf (только VPN) -->
+  <!-- Экран 1: AWG .conf -->
   <!-- ============================================================ -->
   <div id="scr-conf" class="panel hidden">
-    <h2>Шаг 2 из 4 · Файл AmneziaWG-конфига</h2>
-    <p>Загрузите <code>.conf</code>-файл от вашего VPN-сервера. В приложении Amnezia: Настройки → Сервер → Поделиться → Экспорт конфигурации.</p>
+    <h2>Шаг 1 из 3 · Файл AmneziaWG-конфига</h2>
+    <p>Загрузите <code>.conf</code>-файл от вашего AmneziaWG-сервера. В приложении Amnezia: Настройки → Сервер → Поделиться → Экспорт конфигурации.</p>
 
     <label>Файл .conf:</label>
     <input type="file" id="inp-conf" accept=".conf,text/plain">
@@ -154,17 +123,16 @@
 
     <div id="conf-status" class="muted" style="margin-top: 10px;"></div>
 
-    <div class="row" style="justify-content: space-between;">
-      <button class="ghost" onclick="goto('mode')">← Назад</button>
+    <div class="row" style="justify-content: flex-end;">
       <button id="btn-conf-next" disabled>Дальше →</button>
     </div>
   </div>
 
   <!-- ============================================================ -->
-  <!-- Экран 3: Wi-Fi -->
+  <!-- Экран 2: Wi-Fi -->
   <!-- ============================================================ -->
   <div id="scr-wifi" class="panel hidden">
-    <h2 id="wifi-title">Шаг 3 из 4 · Wi-Fi</h2>
+    <h2 id="wifi-title">Шаг 2 из 3 · Wi-Fi</h2>
     <p>Все устройства, подключённые к этой Wi-Fi-сети, автоматически получат настройки — ничего не нужно настраивать на каждом телефоне/ноутбуке.</p>
 
     <label>Название сети (SSID):</label>
@@ -192,14 +160,14 @@
   </div>
 
   <!-- ============================================================ -->
-  <!-- Экран 4: подтверждение -->
+  <!-- Экран 3: подтверждение -->
   <!-- ============================================================ -->
   <div id="scr-confirm" class="panel hidden">
-    <h2 id="confirm-title">Шаг 4 из 4 · Подтверждение</h2>
+    <h2 id="confirm-title">Шаг 3 из 3 · Подтверждение</h2>
     <dl class="kv" id="confirm-summary"></dl>
 
     <div class="edu" style="margin-top: 16px;">
-      Установка займёт 8–12 минут. Роутер скачает и настроит VPN, sing-box, adblock-lean, DNS и остальные компоненты. Вы будете видеть прогресс в реальном времени.
+      Установка займёт ~12 минут. Роутер скачает и настроит AmneziaWG, sing-box, adblock-lean, DNS и остальные компоненты. Вы будете видеть прогресс в реальном времени.
     </div>
 
     <div class="row" style="justify-content: space-between;">
@@ -255,7 +223,6 @@
     <h3>Перезапустить сервис</h3>
     <div class="row">
       <button id="btn-svc-vpn"     class="ghost">VPN</button>
-      <button id="btn-svc-zapret"  class="ghost">zapret</button>
       <button id="btn-svc-dns"     class="ghost">DNS</button>
       <button id="btn-svc-adblock" class="ghost">Adblock</button>
     </div>
@@ -301,7 +268,7 @@ async function rpc(object, method, args) {
 // =====================================================================
 // Навигация между экранами
 // =====================================================================
-const SCREENS = ["loading", "mode", "conf", "wifi", "confirm", "install", "success", "mgmt"];
+const SCREENS = ["loading", "conf", "wifi", "confirm", "install", "success", "mgmt"];
 function goto(name) {
     SCREENS.forEach(s => document.getElementById("scr-" + s).classList.toggle("hidden", s !== name));
     document.getElementById("edu").classList.toggle("hidden", name === "mgmt");
@@ -312,7 +279,6 @@ function goto(name) {
 // Состояние wizard
 // =====================================================================
 const state = {
-    mode: null,
     awgConf: "",
     ssid: "",
     wifiKey: "",
@@ -330,7 +296,7 @@ async function init() {
         // Если уже установлено — на management
         if (st.install_type !== "none") { goto("mgmt"); renderMgmt(st); return; }
         // Иначе wizard
-        goto("mode");
+        goto("conf");
     } catch (e) {
         document.getElementById("scr-loading").innerHTML =
             `<h2>Не получилось соединиться с роутером</h2>
@@ -346,23 +312,7 @@ async function init() {
 }
 
 // =====================================================================
-// Экран 1 — выбор режима
-// =====================================================================
-document.querySelectorAll("#scr-mode .choice-item").forEach(el => {
-    el.addEventListener("click", () => {
-        document.querySelectorAll("#scr-mode .choice-item").forEach(e => e.classList.remove("selected"));
-        el.classList.add("selected");
-        state.mode = el.dataset.mode;
-        document.getElementById("btn-mode-next").disabled = false;
-    });
-});
-document.getElementById("btn-mode-next").onclick = () => {
-    if (state.mode === "vpn") goto("conf");
-    else { state.awgConf = ""; goto("wifi"); updateWifiTitle(); }
-};
-
-// =====================================================================
-// Экран 2 — AWG .conf
+// Экран 1 — AWG .conf
 // =====================================================================
 const taConf = document.getElementById("ta-conf");
 const inpConf = document.getElementById("inp-conf");
@@ -396,17 +346,11 @@ inpConf.addEventListener("change", e => {
 document.getElementById("btn-conf-next").onclick = () => {
     state.awgConf = taConf.value.trim();
     goto("wifi");
-    updateWifiTitle();
 };
 
 // =====================================================================
-// Экран 3 — Wi-Fi
+// Экран 2 — Wi-Fi
 // =====================================================================
-function updateWifiTitle() {
-    const total = state.mode === "vpn" ? 4 : 3;
-    const cur   = state.mode === "vpn" ? 3 : 2;
-    document.getElementById("wifi-title").textContent = `Шаг ${cur} из ${total} · Wi-Fi`;
-}
 const inpSsid = document.getElementById("inp-ssid");
 const inpPass = document.getElementById("inp-pass");
 const inpCountry = document.getElementById("inp-country");
@@ -418,9 +362,7 @@ function refreshWifiValidation() {
 inpSsid.addEventListener("input", refreshWifiValidation);
 inpPass.addEventListener("input", refreshWifiValidation);
 
-document.getElementById("btn-wifi-back").onclick = () => {
-    if (state.mode === "vpn") goto("conf"); else goto("mode");
-};
+document.getElementById("btn-wifi-back").onclick = () => goto("conf");
 document.getElementById("btn-wifi-next").onclick = () => {
     state.ssid    = inpSsid.value.trim();
     state.wifiKey = inpPass.value;
@@ -430,21 +372,18 @@ document.getElementById("btn-wifi-next").onclick = () => {
 };
 
 // =====================================================================
-// Экран 4 — подтверждение
+// Экран 3 — подтверждение
 // =====================================================================
 function renderConfirm() {
-    const total = state.mode === "vpn" ? 4 : 3;
-    document.getElementById("confirm-title").textContent = `Шаг ${total} из ${total} · Подтверждение`;
+    document.getElementById("confirm-title").textContent = "Шаг 3 из 3 · Подтверждение";
     const s = document.getElementById("confirm-summary");
     const rows = [
-        ["Режим",      state.mode === "vpn" ? "VPN (AmneziaWG + podkop + split-routing)" : "zapret (DPI-обход без внешнего сервера)"],
-        ["Wi-Fi",      `${state.ssid} · WPA2/WPA3-mixed · страна ${state.country}`],
+        ["Стек",         "AmneziaWG + podkop + split-routing"],
+        ["Wi-Fi",        `${state.ssid} · WPA2/WPA3-mixed · страна ${state.country}`],
+        ["AWG-конфиг",   `${state.awgConf.split("\n").length} строк, подготовлен`],
+        ["Adblock",      "Hagezi Pro (~200 000 доменов)"],
+        ["DNS",          "Quad9 DoH"],
     ];
-    if (state.mode === "vpn") {
-        rows.push(["AWG-конфиг", `${state.awgConf.split("\n").length} строк, подготовлен`]);
-    }
-    rows.push(["Adblock",       "Hagezi Pro (~200 000 доменов)"]);
-    rows.push(["DNS",           "Quad9 DoH + Cloudflare fallback"]);
     s.innerHTML = rows.map(([k, v]) => `<dt>${k}:</dt><dd>${escapeHtml(v)}</dd>`).join("");
 }
 
@@ -460,7 +399,6 @@ async function startInstall() {
     document.getElementById("install-log").textContent = "";
     try {
         await rpc("cheburnet", "install_start", {
-            mode:     state.mode,
             ssid:     state.ssid,
             wifi_key: state.wifiKey,
             country:  state.country,
@@ -476,10 +414,10 @@ async function startInstall() {
 const STEP_PCT = {
     "starting": 3, "00-prerequisites": 7,
     "01-amneziawg": 18, "02-podkop": 35, "03-adblock": 48,
-    "04-dns": 55, "04-dns-zapret": 55, "05-wifi": 65,
+    "04-dns": 55, "05-wifi": 65,
     "06-vpn-mode": 72, "07-killswitch": 76, "08-watchdog": 80,
     "09-ssh-hardening": 83, "10-quality": 88, "11-travel": 92,
-    "12-travel-plus": 96, "13-zapret": 90, "done": 100
+    "12-travel-plus": 96, "done": 100
 };
 
 async function pollProgress() {
@@ -524,9 +462,7 @@ async function renderMgmt(st) {
     const muted = (txt) => `<span class="dot dot-muted"></span>${txt}`;
 
     const rows = [];
-    rows.push(["Тип установки", st.install_type === "vpn" ? "VPN (AmneziaWG + podkop)"
-                                  : st.install_type === "zapret" ? "zapret (DPI-обход)"
-                                  : "не установлено"]);
+    rows.push(["Тип установки", st.install_type === "vpn" ? "AmneziaWG + podkop" : "не установлено"]);
     if (st.install_type === "vpn") {
         rows.push(["Режим", st.mode || "не задан"]);
         rows.push(["AmneziaWG tunnel", st.awg_handshake_age === null ? muted("нет handshake")
@@ -534,17 +470,14 @@ async function renderMgmt(st) {
                         : `<span class="dot dot-err"></span>handshake ${st.awg_handshake_age}s назад (протух, рестартуйте VPN)`]);
         rows.push(["podkop + sing-box", up(st.podkop_up)]);
     }
-    if (st.install_type === "zapret") {
-        rows.push(["zapret (nfqws)", up(st.zapret_up)]);
-    }
-    rows.push(["DNS (DoH)",        up(st.doh_up || st.podkop_up)]);
+    rows.push(["DNS (DoH)",        up(st.podkop_up)]);
     rows.push(["Adblock-lean",     up(st.adblock_up)]);
     rows.push(["Wi-Fi SSID",       st.ssid || "(не задан)"]);
 
     document.getElementById("mgmt-status").innerHTML =
         rows.map(([k, v]) => `<dt>${k}:</dt><dd>${v}</dd>`).join("");
 
-    // Переключение режима — только для VPN
+    // Переключение режима показываем только когда установлен VPN
     const showMode = st.install_type === "vpn";
     document.getElementById("mgmt-mode-header").classList.toggle("hidden", !showMode);
     document.getElementById("mgmt-mode").classList.toggle("hidden", !showMode);
@@ -569,7 +502,6 @@ async function mgmtCall(object, method, args, label) {
 document.getElementById("btn-home").onclick    = () => mgmtCall("cheburnet", "mode_switch",    { mode: "home" },    "Переключение в HOME");
 document.getElementById("btn-travel").onclick  = () => mgmtCall("cheburnet", "mode_switch",    { mode: "travel" },  "Переключение в TRAVEL");
 document.getElementById("btn-svc-vpn").onclick     = () => mgmtCall("cheburnet", "service_restart", { service: "vpn" },     "Перезапуск VPN");
-document.getElementById("btn-svc-zapret").onclick  = () => mgmtCall("cheburnet", "service_restart", { service: "zapret" },  "Перезапуск zapret");
 document.getElementById("btn-svc-dns").onclick     = () => mgmtCall("cheburnet", "service_restart", { service: "dns" },     "Перезапуск DNS");
 document.getElementById("btn-svc-adblock").onclick = () => mgmtCall("cheburnet", "service_restart", { service: "adblock" }, "Перезагрузка adblock");
 

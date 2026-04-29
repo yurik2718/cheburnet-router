@@ -1,15 +1,12 @@
 #!/bin/sh
 # run-install.sh — orchestrator установки, запускается на роутере в фоне из
-# RPC-метода install_start. Заменяет ssh/scp-часть full-deploy*.sh для случая
+# RPC-метода install_start. Заменяет ssh/scp-часть full-deploy.sh для случая
 # когда мы УЖЕ на роутере.
-#
-# Usage: run-install.sh {vpn|zapret}
 #
 # Пишет прогресс в /tmp/cheburnet/state, итоговый результат в /tmp/cheburnet/done.
 # Логи уходят в stdout/stderr → перехватываются вызывающим кодом в /tmp/cheburnet/install.log
 set -e
 
-MODE="${1:-vpn}"
 INSTALL_DIR="/opt/cheburnet"
 STATE_DIR="/tmp/cheburnet"
 STATE="$STATE_DIR/state"
@@ -46,23 +43,15 @@ fi
 export WIFI_SSID WIFI_KEY WIFI_COUNTRY
 
 # === Список шагов ===
-if [ "$MODE" = "vpn" ]; then
-    # .conf должен быть уже в /etc/amnezia/amneziawg/awg0.conf (положен rpcd-handler'ом)
-    if [ ! -f /etc/amnezia/amneziawg/awg0.conf ]; then
-        echo "✗ /etc/amnezia/amneziawg/awg0.conf не найден"
-        echo "fail-no-awg-config" > "$DONE"
-        exit 1
-    fi
-    STEPS="00-prerequisites.sh 01-amneziawg.sh 02-podkop.sh 03-adblock.sh \
-           04-dns.sh 05-wifi.sh 06-vpn-mode.sh 07-killswitch.sh 08-watchdog.sh \
-           10-quality.sh 11-travel.sh 12-travel-plus.sh"
-elif [ "$MODE" = "zapret" ]; then
-    STEPS="00-prerequisites.sh 03-adblock.sh 04-dns-zapret.sh 05-wifi.sh 13-zapret.sh"
-else
-    echo "✗ Неизвестный режим: $MODE"
-    echo "fail-unknown-mode" > "$DONE"
+# .conf должен быть уже в /etc/amnezia/amneziawg/awg0.conf (положен rpcd-handler'ом)
+if [ ! -f /etc/amnezia/amneziawg/awg0.conf ]; then
+    echo "✗ /etc/amnezia/amneziawg/awg0.conf не найден"
+    echo "fail-no-awg-config" > "$DONE"
     exit 1
 fi
+STEPS="00-prerequisites.sh 01-amneziawg.sh 02-podkop.sh 03-adblock.sh \
+       04-dns.sh 05-wifi.sh 06-vpn-mode.sh 07-killswitch.sh 08-watchdog.sh \
+       10-quality.sh 11-travel.sh 12-travel-plus.sh"
 
 # === Выполнение ===
 for STEP in $STEPS; do

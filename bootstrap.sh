@@ -12,7 +12,7 @@
 # После выполнения откройте в браузере:
 #   http://<IP_роутера>/cheburnet/
 #
-# Всё остальное — настройку VPN/zapret, Wi-Fi, adblock — мастер сделает сам.
+# Всё остальное — настройку VPN, Wi-Fi, adblock — мастер сделает сам.
 set -e
 
 REPO_TAR="https://codeload.github.com/yurik2718/cheburnet-router/tar.gz/refs/heads/main"
@@ -178,7 +178,7 @@ echo
 echo "  Откройте в браузере:"
 echo "  →  http://$ROUTER_IP/cheburnet/"
 echo
-echo "  Веб-мастер настроит VPN/zapret, Wi-Fi и adblock сам."
+echo "  Веб-мастер настроит VPN, Wi-Fi и adblock сам."
 echo
 
 # Cleanup

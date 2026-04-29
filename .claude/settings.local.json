@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash -n /home/pingvinus/cheburnet-router/setup.sh)",
+      "Bash(sh -n /home/pingvinus/cheburnet-router/bootstrap.sh)",
+      "Bash(sh -n /home/pingvinus/cheburnet-router/web/run-install.sh)",
+      "Bash(sh -n /home/pingvinus/cheburnet-router/web/rpcd-cheburnet)",
+      "Bash(sh -n /home/pingvinus/cheburnet-router/setup/full-deploy.sh)"
+    ]
+  }
+}

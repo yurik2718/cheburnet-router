@@ -15,91 +15,29 @@ ask()  { printf "  %s: " "$1"; }
 step() { printf "\n${B}${BOLD}[%s] %s${N}\n\n" "$1" "$2"; }
 
 # ══════════════════════════════════════════════════════════════════════
-# ЭКРАН 1 — Приветствие и выбор режима
+# ЭКРАН 1 — Приветствие и предварительные требования
 # ══════════════════════════════════════════════════════════════════════
 clear
 hr
-printf "${BOLD}  cheburnet-router — свободный интернет дома${N}\n"
+printf "${BOLD}  cheburnet-router — образовательный OpenWrt-стенд${N}\n"
 hr
 printf "\n"
-printf "  Этот мастер настроит ваш роутер, чтобы:\n"
-printf "    • Заблокированные сайты открывались\n"
-printf "    • Реклама блокировалась на всех устройствах в сети\n"
-printf "    • .ru .su .рф сайты работали с обычной скоростью\n"
+printf "  Этот мастер настроит ваш роутер с:\n"
+printf "    • AmneziaWG — VPN-туннель с обфускацией\n"
+printf "    • Podkop + sing-box — split-routing (.ru напрямую, остальное через VPN)\n"
+printf "    • adblock-lean + Hagezi Pro — блокировка рекламы на уровне DNS\n"
+printf "    • Quad9 DoH — зашифрованный DNS\n"
+printf "    • Three-layer kill switch — защита от утечек\n"
 printf "\n"
 
-hr
-printf "\n"
-printf "  ${BOLD}Выберите способ обхода блокировок:${N}\n\n"
-
-printf "  ${B}${BOLD}[1] VPN — AmneziaWG${N}   ${G}★ рекомендуем${N}\n\n"
-printf "      Как работает:\n"
-printf "      Ваш трафик идёт через зашифрованный туннель до VPN-сервера\n"
-printf "      за рубежом. Провайдер видит только зашифрованный поток —\n"
-printf "      не видит ни сайты, ни содержимое.\n\n"
-printf "      Что открывает:\n"
-printf "      ✓ Все заблокированные сайты — YouTube, Instagram, Telegram\n"
-printf "      ✓ Любые IP-блокировки\n"
-printf "      ✓ .ru .su .рф идут напрямую без VPN — скорость не страдает\n\n"
-printf "      Что нужно:\n"
-printf "      ✗ Платный VPN-сервер (~300–500 руб/мес)\n"
-printf "        Amnezia VPN (amnezia.org) или свой VPS с AmneziaWG\n\n"
-
-hr
-printf "\n"
-
-printf "  ${B}${BOLD}[2] zapret${N}   ${Y}бесплатно, без сервера${N}\n\n"
-printf "      Как работает:\n"
-printf "      Роутер «ломает» заголовки TCP-пакетов так, что DPI-оборудование\n"
-printf "      провайдера не распознаёт к какому сайту вы идёте и не блокирует.\n"
-printf "      Никакого внешнего сервера — всё работает локально на роутере.\n\n"
-printf "      Что открывает:\n"
-printf "      ✓ Сайты заблокированные через DPI: YouTube, Twitch, часть других\n"
-printf "      ✓ Бесплатно, без вложений\n\n"
-printf "      Ограничения:\n"
-printf "      ✗ НЕ работает с IP-блокировками: Instagram, Facebook\n"
-printf "        могут по-прежнему не открываться\n"
-printf "      ✗ Провайдер видит какие сайты вы открываете (трафик не скрыт)\n"
-printf "      ✗ Эффективность зависит от провайдера — может не помочь у всех\n\n"
-
-hr
-printf "\n"
-printf "  ${BOLD}Наш совет:${N}\n\n"
-printf "  Если нужен Instagram или важна приватность — берите VPN [1].\n"
-printf "  Если нет денег на VPN прямо сейчас — попробуйте zapret [2],\n"
-printf "  это лучше чем ничего.\n\n"
-hr
-printf "\n"
-
-ask "Ваш выбор [1 = VPN / 2 = zapret]"
-read -r _mode_input
-
-case "${_mode_input:-}" in
-    1) MODE="vpn" ;;
-    2) MODE="zapret" ;;
-    *) die "Введите 1 или 2" ;;
-esac
-
-# ══════════════════════════════════════════════════════════════════════
-# ЭКРАН 2 — Предварительные требования
-# ══════════════════════════════════════════════════════════════════════
-clear
-hr
-if [ "$MODE" = "vpn" ]; then
-    printf "${BOLD}  Режим: VPN (AmneziaWG)${N}\n"
-else
-    printf "${BOLD}  Режим: zapret (обход DPI)${N}\n"
-fi
 hr
 printf "\n"
 printf "  ${BOLD}Перед началом убедитесь что у вас есть:${N}\n\n"
-printf "  ✓ Роутер, прошитый на OpenWrt 25.12\n"
+printf "  ✓ Роутер, прошитый на OpenWrt 25.12+\n"
 printf "    (инструкция: README.md → Шаг 1 и Шаг 2)\n\n"
-if [ "$MODE" = "vpn" ]; then
-    printf "  ✓ Файл .conf от AmneziaWG\n"
-    printf "    Amnezia VPN: в приложении → Настройки → Экспорт конфигурации\n"
-    printf "    Свой сервер: amnezia.org → установите через приложение на VPS\n\n"
-fi
+printf "  ✓ Файл .conf от AmneziaWG\n"
+printf "    Amnezia Premium: в приложении → Настройки → Экспорт конфигурации\n"
+printf "    Свой VPS: установите AmneziaWG через приложение Amnezia на VPS\n\n"
 printf "  ✓ Компьютер подключён к роутеру кабелем\n\n"
 printf "  ✓ SSH работает: ssh root@192.168.1.1\n\n"
 hr
@@ -226,60 +164,53 @@ if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$ROUTER" 'true' >/dev/null 2>&1; 
 fi
 
 # ══════════════════════════════════════════════════════════════════════
-# ШАГ 2 — VPN-конфиг (только для режима VPN)
+# ШАГ 2 — VPN-конфиг
 # ══════════════════════════════════════════════════════════════════════
-if [ "$MODE" = "vpn" ]; then
-    step "2/4" "Файл VPN-конфигурации (.conf)"
-    printf "  AmneziaWG-конфиг — это небольшой файл с параметрами подключения\n"
-    printf "  к вашему VPN-серверу. Без него VPN работать не будет.\n\n"
-    printf "  Где взять:\n"
-    printf "    Amnezia VPN → в приложении → выберите сервер → Поделиться →\n"
-    printf "    Экспорт конфигурации → скачайте файл .conf\n\n"
-    printf "    Свой VPS → установите AmneziaWG через приложение Amnezia,\n"
-    printf "    потом так же экспортируйте .conf\n\n"
-    ask "Путь к файлу .conf (например: ~/Downloads/amnezia.conf)"
-    read -r _input
-    CONF_PATH="${_input/#\~/$HOME}"
-    if [ -z "$CONF_PATH" ]; then
-        die "Путь к файлу не может быть пустым — повторите запуск мастера"
-    fi
-    if [ ! -f "$CONF_PATH" ]; then
-        printf "\n"
-        printf "  Что проверить:\n"
-        printf "    • Скопируйте точный путь из файлового менеджера\n"
-        printf "    • Используйте ~/ для домашней папки или полный путь\n"
-        printf "    • На macOS — перетащите файл в окно терминала, путь подставится\n"
-        die "Файл не найден: $CONF_PATH"
-    fi
-    if ! grep -q '\[Interface\]' "$CONF_PATH"; then
-        printf "\n"
-        printf "  Это не похоже на AmneziaWG-конфиг — нет секции [Interface].\n\n"
-        printf "  Откуда берётся правильный конфиг:\n"
-        printf "    • Приложение Amnezia VPN → Настройки → Экспорт конфигурации\n"
-        printf "    • Получится файл вида: [Interface]...PrivateKey=...[Peer]...\n"
-        die "Неправильный формат файла"
-    fi
-    if ! grep -q 'PrivateKey' "$CONF_PATH" || ! grep -q '\[Peer\]' "$CONF_PATH"; then
-        printf "\n"
-        printf "  В файле отсутствуют критичные секции (PrivateKey и/или [Peer]).\n"
-        printf "  Скорее всего вы экспортировали публичную часть вместо полной.\n"
-        printf "  Попробуйте ещё раз экспортировать конфиг в приложении Amnezia.\n"
-        die "Неполный AmneziaWG-конфиг"
-    fi
-    ok "Конфиг найден и выглядит правильно"
+step "2/4" "Файл AmneziaWG-конфигурации (.conf)"
+printf "  AmneziaWG-конфиг — это небольшой файл с параметрами подключения\n"
+printf "  к вашему VPN-серверу. Без него стенд не поднимется.\n\n"
+printf "  Где взять:\n"
+printf "    Amnezia Premium → в приложении → выберите сервер → Поделиться →\n"
+printf "    Экспорт конфигурации → скачайте файл .conf\n\n"
+printf "    Свой VPS → установите AmneziaWG через приложение Amnezia,\n"
+printf "    потом так же экспортируйте .conf\n\n"
+ask "Путь к файлу .conf (например: ~/Downloads/amnezia.conf)"
+read -r _input
+CONF_PATH="${_input/#\~/$HOME}"
+if [ -z "$CONF_PATH" ]; then
+    die "Путь к файлу не может быть пустым — повторите запуск мастера"
 fi
+if [ ! -f "$CONF_PATH" ]; then
+    printf "\n"
+    printf "  Что проверить:\n"
+    printf "    • Скопируйте точный путь из файлового менеджера\n"
+    printf "    • Используйте ~/ для домашней папки или полный путь\n"
+    printf "    • На macOS — перетащите файл в окно терминала, путь подставится\n"
+    die "Файл не найден: $CONF_PATH"
+fi
+if ! grep -q '\[Interface\]' "$CONF_PATH"; then
+    printf "\n"
+    printf "  Это не похоже на AmneziaWG-конфиг — нет секции [Interface].\n\n"
+    printf "  Откуда берётся правильный конфиг:\n"
+    printf "    • Приложение Amnezia VPN → Настройки → Экспорт конфигурации\n"
+    printf "    • Получится файл вида: [Interface]...PrivateKey=...[Peer]...\n"
+    die "Неправильный формат файла"
+fi
+if ! grep -q 'PrivateKey' "$CONF_PATH" || ! grep -q '\[Peer\]' "$CONF_PATH"; then
+    printf "\n"
+    printf "  В файле отсутствуют критичные секции (PrivateKey и/или [Peer]).\n"
+    printf "  Скорее всего вы экспортировали публичную часть вместо полной.\n"
+    printf "  Попробуйте ещё раз экспортировать конфиг в приложении Amnezia.\n"
+    die "Неполный AmneziaWG-конфиг"
+fi
+ok "Конфиг найден и выглядит правильно"
 
 # ══════════════════════════════════════════════════════════════════════
 # ШАГ 3 — Wi-Fi
 # ══════════════════════════════════════════════════════════════════════
-if [ "$MODE" = "vpn" ]; then
-    WIFI_STEP_NUM="3/4"
-else
-    WIFI_STEP_NUM="2/3"
-fi
-step "$WIFI_STEP_NUM" "Настройка Wi-Fi"
+step "3/4" "Настройка Wi-Fi"
 printf "  Придумайте имя и пароль для домашней Wi-Fi сети.\n"
-printf "  Все устройства подключённые к этой сети получат обход блокировок\n"
+printf "  Все устройства подключённые к этой сети получат настройки\n"
 printf "  автоматически — ничего не нужно настраивать на каждом телефоне/ноутбуке.\n\n"
 ask "Название сети (SSID)"
 read -r WIFI_SSID
@@ -301,41 +232,22 @@ ok "Wi-Fi: SSID='$WIFI_SSID', страна=$WIFI_COUNTRY"
 # ══════════════════════════════════════════════════════════════════════
 # ШАГ 4 — Подтверждение и установка
 # ══════════════════════════════════════════════════════════════════════
-if [ "$MODE" = "vpn" ]; then
-    CONFIRM_STEP_NUM="4/4"
-else
-    CONFIRM_STEP_NUM="3/3"
-fi
-step "$CONFIRM_STEP_NUM" "Подтверждение"
+step "4/4" "Подтверждение"
 
 hr
-if [ "$MODE" = "vpn" ]; then
-    printf "${BOLD}  Итог — что будет установлено (режим VPN):${N}\n"
-    hr
-    printf "\n"
-    printf "  Роутер:    %s\n" "$ROUTER_IP"
-    printf "  VPN-файл:  %s\n" "$(basename "$CONF_PATH")"
-    printf "  Wi-Fi:     %s (WPA3)\n\n" "$WIFI_SSID"
-    printf "  Компоненты:\n"
-    printf "    ✓ AmneziaWG — VPN-туннель с защитой от DPI-блокировок\n"
-    printf "    ✓ Podkop — .ru/.su/.рф напрямую, остальное через VPN\n"
-    printf "    ✓ Hagezi Pro — блокировка 200к+ рекламных доменов\n"
-    printf "    ✓ Quad9 DoH — зашифрованный DNS (провайдер не видит DNS-запросы)\n"
-    printf "    ✓ Kill switch — при падении VPN трафик блокируется, не утекает\n"
-    printf "    ✓ Watchdog — автоперезапуск VPN при зависании\n"
-else
-    printf "${BOLD}  Итог — что будет установлено (режим zapret):${N}\n"
-    hr
-    printf "\n"
-    printf "  Роутер:  %s\n" "$ROUTER_IP"
-    printf "  Wi-Fi:   %s (WPA3)\n\n" "$WIFI_SSID"
-    printf "  Компоненты:\n"
-    printf "    ✓ zapret — обход DPI-блокировок без внешнего сервера\n"
-    printf "    ✓ Hagezi Pro — блокировка 200к+ рекламных доменов\n"
-    printf "    ✓ Quad9 DoH — зашифрованный DNS\n\n"
-    warn "Instagram, Facebook и сайты с IP-блокировкой могут не работать."
-    printf "  Для них нужен VPN.\n"
-fi
+printf "${BOLD}  Итог — что будет установлено:${N}\n"
+hr
+printf "\n"
+printf "  Роутер:    %s\n" "$ROUTER_IP"
+printf "  VPN-файл:  %s\n" "$(basename "$CONF_PATH")"
+printf "  Wi-Fi:     %s (WPA2/WPA3-mixed)\n\n" "$WIFI_SSID"
+printf "  Компоненты:\n"
+printf "    ✓ AmneziaWG — VPN-туннель с обфускацией\n"
+printf "    ✓ Podkop + sing-box — .ru/.su/.рф напрямую, остальное через VPN\n"
+printf "    ✓ Hagezi Pro — блокировка 200к+ рекламных доменов\n"
+printf "    ✓ Quad9 DoH — зашифрованный DNS\n"
+printf "    ✓ Kill switch — при падении VPN трафик блокируется\n"
+printf "    ✓ Watchdog — авто-перезапуск VPN при зависании\n"
 printf "\n"
 hr
 printf "\n  Продолжить? [Enter = да, Ctrl+C = отмена]: "
@@ -350,16 +262,11 @@ WIFI_COUNTRY="$WIFI_COUNTRY"
 EOF
 ok "Wi-Fi конфиг сохранён"
 
-if [ "$MODE" = "vpn" ]; then
-    cp "$CONF_PATH" "$REPO_ROOT/configs/awg0.conf"
-    chmod 600 "$REPO_ROOT/configs/awg0.conf"
-    ok "VPN конфиг сохранён"
-    printf "\n  ${BOLD}Запускаем установку VPN (~12 минут)...${N}\n\n"
-    "$REPO_ROOT/setup/full-deploy.sh" "$ROUTER"
-else
-    printf "\n  ${BOLD}Запускаем установку zapret (~8 минут)...${N}\n\n"
-    "$REPO_ROOT/setup/full-deploy-zapret.sh" "$ROUTER"
-fi
+cp "$CONF_PATH" "$REPO_ROOT/configs/awg0.conf"
+chmod 600 "$REPO_ROOT/configs/awg0.conf"
+ok "VPN конфиг сохранён"
+printf "\n  ${BOLD}Запускаем установку (~12 минут)...${N}\n\n"
+"$REPO_ROOT/setup/full-deploy.sh" "$ROUTER"
 
 # ══════════════════════════════════════════════════════════════════════
 # Финал
@@ -374,25 +281,15 @@ printf "  1. Подключитесь к Wi-Fi: ${BOLD}%s${N}\n" "$WIFI_SSID"
 printf "  2. Откройте ${BOLD}speedtest.yandex.ru${N}\n"
 printf "     Российский сервис — должен работать напрямую\n\n"
 printf "  3. Откройте ${BOLD}speedtest.net${N}\n"
-printf "     В России заблокирован — откроется только если обход работает\n\n"
+printf "     Откроется через VPN-туннель\n\n"
 hr
 printf "\n"
-if [ "$MODE" = "vpn" ]; then
-    printf "${BOLD}Управление VPN (через SSH):${N}\n\n"
-    printf "  Подключиться к роутеру:  ${BOLD}ssh root@%s${N}\n\n" "$ROUTER_IP"
-    printf "  vpn-mode status    — текущий режим\n"
-    printf "  vpn-mode home      — .ru напрямую + остальное через VPN\n"
-    printf "  vpn-mode travel    — весь трафик через VPN\n"
-    printf "  travel-check       — полная диагностика\n"
-else
-    printf "${BOLD}Управление zapret (через SSH):${N}\n\n"
-    printf "  Подключиться к роутеру:  ${BOLD}ssh root@%s${N}\n\n" "$ROUTER_IP"
-    printf "  /etc/init.d/zapret status             — статус DPI-обхода\n"
-    printf "  /etc/init.d/zapret restart            — перезапустить zapret\n"
-    printf "  /etc/init.d/https-dns-proxy status    — статус шифрованного DNS\n\n"
-    warn "Если нужные сайты всё ещё не открываются:"
-    printf "  Попробуйте другую стратегию. Подробнее: README.md → раздел zapret\n"
-fi
+printf "${BOLD}Управление через SSH:${N}\n\n"
+printf "  Подключиться к роутеру:  ${BOLD}ssh root@%s${N}\n\n" "$ROUTER_IP"
+printf "  vpn-mode status    — текущий режим\n"
+printf "  vpn-mode home      — .ru напрямую + остальное через VPN\n"
+printf "  vpn-mode travel    — весь трафик через VPN\n"
+printf "  travel-check       — полная диагностика\n"
 printf "\n"
 hr
 printf "\n"
