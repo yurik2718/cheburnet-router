@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>cheburnet-router · настройка</title>
+<title>cheburnet-router · образовательный OpenWrt-стенд</title>
 <style>
   :root {
     --bg: #0e1013;
@@ -114,6 +114,14 @@
   <div id="scr-conf" class="panel hidden">
     <h2>Шаг 1 из 3 · Файл AmneziaWG-конфига</h2>
     <p>Загрузите <code>.conf</code>-файл от вашего AmneziaWG-сервера. В приложении Amnezia: Настройки → Сервер → Поделиться → Экспорт конфигурации.</p>
+
+    <div class="edu" style="margin: 12px 0;">
+      <strong>Нет своего сервера?</strong> Самый простой вариант —
+      <a href="https://storage.googleapis.com/amnezia/amnezia.org?m-path=premium&arf=EB5KDKXCJYQYP4MG"
+         target="_blank" style="color:var(--accent)">Amnezia Premium</a>
+      (готовая подписка, экспорт <code>.conf</code> в один клик).
+      <span class="muted">Реферальная ссылка — поддерживает развитие проекта.</span>
+    </div>
 
     <label>Файл .conf:</label>
     <input type="file" id="inp-conf" accept=".conf,text/plain">

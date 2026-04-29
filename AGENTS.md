@@ -6,9 +6,12 @@
 
 ## Что это за проект
 
-Полная настройка роутера **GL.iNet Beryl AX (GL-MT3000)** или **Cudy TR3000** (и др. на MediaTek MT7981) на ванильной **OpenWrt 25.12.2** для приватной маршрутизации, обхода сетевых ограничений через VPN-обфускацию и полноценной домашней/travel-эксплуатации. Акценты:
+**Образовательный OpenWrt-стенд** на роутере **GL.iNet Beryl AX (GL-MT3000)** или **Cudy TR3000** (и др. на MediaTek MT7981) с ванильной **OpenWrt 25.12.2**. Демонстрирует на одном устройстве работу современных сетевых технологий: AmneziaWG-обфускация, policy-based routing (split-routing), DNS-over-HTTPS, three-layer kill switch, WPA3. Технологии — индустриально-стандартные, применяются в корпоративных сетях.
 
-- Надёжность (работает годами без обслуживания, в т.ч. у нетехнических пользователей)
+Акценты:
+
+- Образовательность (каждая глава docs/ объясняет «почему так, а не иначе», ссылки на RFC и whitepapers)
+- Надёжность (работает годами без обслуживания)
 - Приватность (минимум утечек, доверенные провайдеры, defence-in-depth)
 - Кросс-платформенность (один репо → несколько моделей железа)
 
@@ -79,7 +82,9 @@
 ## Контакты / источники
 
 - Оригинальная сессия сборки: ChatGPT/Claude chat от апреля 2026
-- Amnezia Premium (источник AWG-конфигов): https://amnezia.org/
+- Amnezia (источник AWG-конфигов): https://amnezia.org/
+- **Amnezia Premium (реф-ссылка проекта)**: https://storage.googleapis.com/amnezia/amnezia.org?m-path=premium&arf=EB5KDKXCJYQYP4MG
+  — единственное место в репозитории с реф-кодом. При смене кода менять здесь, в README.md (Шаг 3 + Благодарности), web/index.html (scr-conf edu-block) и setup.sh (`AMNEZIA_REF_URL`).
 - Podkop: https://github.com/itdoginfo/podkop
 - OpenWrt: https://openwrt.org/
 
