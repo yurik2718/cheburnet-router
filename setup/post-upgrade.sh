@@ -32,17 +32,39 @@ fi
 # === 3. AmneziaWG (kmod + tools + luci-proto) ===
 if ! lsmod | grep -q '^amneziawg '; then
     echo "→ AmneziaWG пакеты"
-    BASE=https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/v25.12.2
-    ARCH=aarch64_cortex-a53_mediatek_filogic   # для Beryl AX
 
+    # Автодетект архитектуры/версии (см. 01-amneziawg.sh — логика синхронизирована)
+    # shellcheck disable=SC1091
+    . /etc/openwrt_release
+    if [ -z "${DISTRIB_ARCH:-}" ] || [ -z "${DISTRIB_TARGET:-}" ] || [ -z "${DISTRIB_RELEASE:-}" ]; then
+        echo "✗ Не удалось определить архитектуру/версию роутера." >&2
+        exit 1
+    fi
+    ARCH="${DISTRIB_ARCH}_$(echo "$DISTRIB_TARGET" | tr '/' '_')"
+
+    AWG_VER=""
+    for TRY in "$DISTRIB_RELEASE" "25.12.2"; do
+        [ -z "$TRY" ] && continue
+        URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/v${TRY}/kmod-amneziawg_v${TRY}_${ARCH}.apk"
+        if wget -q --spider --timeout=15 "$URL" 2>/dev/null; then
+            AWG_VER="$TRY"; break
+        fi
+    done
+    if [ -z "$AWG_VER" ]; then
+        echo "✗ Нет совместимого релиза awg-openwrt для OpenWrt ${DISTRIB_RELEASE} / ${ARCH}." >&2
+        exit 1
+    fi
+    echo "  arch=${ARCH}, awg-openwrt=v${AWG_VER}"
+
+    BASE="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/v${AWG_VER}"
     cd /tmp
-    for PKG in kmod-amneziawg_v25.12.2 amneziawg-tools_v25.12.2 luci-proto-amneziawg_v25.12.2; do
+    for PKG in "kmod-amneziawg_v${AWG_VER}" "amneziawg-tools_v${AWG_VER}" "luci-proto-amneziawg_v${AWG_VER}"; do
         FILE="${PKG}_${ARCH}.apk"
         wget -q -O "$FILE" "$BASE/$FILE" || { echo "download failed: $FILE"; exit 1; }
     done
-    apk add --allow-untrusted ./kmod-amneziawg_v25.12.2_${ARCH}.apk \
-                              ./amneziawg-tools_v25.12.2_${ARCH}.apk \
-                              ./luci-proto-amneziawg_v25.12.2_${ARCH}.apk
+    apk add --allow-untrusted "./kmod-amneziawg_v${AWG_VER}_${ARCH}.apk" \
+                              "./amneziawg-tools_v${AWG_VER}_${ARCH}.apk" \
+                              "./luci-proto-amneziawg_v${AWG_VER}_${ARCH}.apk"
     modprobe amneziawg
 fi
 

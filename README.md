@@ -246,9 +246,14 @@ ssh root@192.168.1.1 'travel-check'   # полная диагностика од
 
 - ≥ 256 МБ RAM (рекомендуется 512 МБ)
 - ≥ 64 МБ flash
-- OpenWrt 23.05+ (рекомендуется 25.12+)
+- OpenWrt 25.12+ (с `apk`-пакетным менеджером)
+- Архитектура, для которой есть [готовые пакеты awg-openwrt](https://github.com/Slava-Shchipunov/awg-openwrt/releases): `aarch64_cortex-a53_mediatek_filogic`, `x86_64`, `mipsel_24kc` и др.
 
-> Портирование на другое железо: [setup/README.md](setup/README.md)
+### Универсальность
+
+Установка не привязана к конкретному роутеру: архитектура пакетов AmneziaWG, версия awg-openwrt и LAN-подсеть **определяются автоматически** из `/etc/openwrt_release` и `uci show network.lan` при запуске `setup.sh`. На любом совместимом OpenWrt-роутере мастер ставит сборку без правок.
+
+> Подробности портирования и список того, что детектится автоматически: [setup/README.md](setup/README.md)
 
 ---
 

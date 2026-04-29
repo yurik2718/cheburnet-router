@@ -19,6 +19,30 @@ fi
 # === 2. UCI-конфигурация ===
 echo "→ настраиваем podkop UCI"
 
+# Определяем реальную LAN-подсеть (а не хардкод 192.168.1.0/24).
+# Сначала пробуем стандартный helper OpenWrt; на старых сборках fallback через ipcalc.sh.
+LAN_CIDR=""
+if [ -f /lib/functions/network.sh ]; then
+    # shellcheck disable=SC1091
+    . /lib/functions/network.sh
+    network_flush_cache
+    network_get_subnet LAN_CIDR lan 2>/dev/null || true
+fi
+if [ -z "$LAN_CIDR" ]; then
+    LAN_IP=$(uci -q get network.lan.ipaddr || echo "")
+    LAN_MASK=$(uci -q get network.lan.netmask || echo "255.255.255.0")
+    if [ -n "$LAN_IP" ] && command -v ipcalc.sh >/dev/null 2>&1; then
+        LAN_CIDR=$(ipcalc.sh "$LAN_IP" "$LAN_MASK" 2>/dev/null \
+            | awk -F= '/^NETWORK/{n=$2} /^PREFIX/{p=$2} END{if(n && p) print n"/"p}')
+    fi
+fi
+if [ -z "$LAN_CIDR" ]; then
+    echo "✗ Не удалось определить LAN-подсеть из uci." >&2
+    echo "  Проверьте: uci show network.lan" >&2
+    exit 1
+fi
+echo "  LAN-подсеть: $LAN_CIDR"
+
 # main section: всё от LAN → через AWG
 uci set podkop.main.connection_type='vpn'
 uci set podkop.main.interface='awg0'
@@ -26,7 +50,7 @@ uci -q delete podkop.main.community_lists
 uci -q delete podkop.main.proxy_config_type
 uci -q delete podkop.main.proxy_string
 uci -q delete podkop.main.fully_routed_ips
-uci add_list podkop.main.fully_routed_ips='192.168.1.0/24'
+uci add_list podkop.main.fully_routed_ips="$LAN_CIDR"
 
 # exclude_ru section: исключения для RU-сервисов
 uci set podkop.exclude_ru=section

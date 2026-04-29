@@ -61,28 +61,33 @@ ssh "$ROUTER" 'sh -s' < setup/01-amneziawg.sh
 
 ## Портирование на другое железо
 
+### Что определяется автоматически
+
+| Параметр | Источник | Файл |
+|---|---|---|
+| Архитектура пакетов awg-openwrt | `${DISTRIB_ARCH}_${DISTRIB_TARGET}` из `/etc/openwrt_release` | `01-amneziawg.sh`, `post-upgrade.sh` |
+| Версия awg-openwrt | `v$DISTRIB_RELEASE` с fallback на последнюю стабильную (v25.12.2) | то же |
+| LAN-подсеть | `network_get_subnet lan` через `/lib/functions/network.sh`, fallback на `ipcalc.sh` | `02-podkop.sh`, `07-killswitch.sh` |
+| Архитектура nfqws-бинарника | `uname -m` | (zapret удалён, неактуально) |
+
+Поэтому переустановка на любой OpenWrt 25.12+ с поддерживаемой awg-openwrt архитектурой проходит без правок.
+
 ### Что переносится без правок
 
 - `scripts/*` — POSIX sh, работают на любом OpenWrt 23.05+ с busybox.
 - UCI-конфигурация — формат стабилен между версиями.
 - `07-killswitch.sh`, `05-wifi.sh`, `10-quality.sh` — не привязаны к железу.
 
-### Что нужно адаптировать
+### Что может потребовать ручной адаптации
 
-1. **Архитектура CPU.**
-   `setup/01-amneziawg.sh` и `setup/post-upgrade.sh` пинят `ARCH=aarch64_cortex-a53_mediatek_filogic`. Для другой платформы замените на соответствующую — полный список тегов в [awg-openwrt releases](https://github.com/Slava-Shchipunov/awg-openwrt/releases) (например, `x86_64`, `mipsel_24kc`, `aarch64_generic`).
+1. **Архитектура без релиза в awg-openwrt.**
+   Если для вашей архитектуры нет готового релиза в [awg-openwrt releases](https://github.com/Slava-Shchipunov/awg-openwrt/releases) — `01-amneziawg.sh` упадёт с понятной ошибкой. Решение — собрать `kmod-amneziawg` вручную по инструкции из репозитория awg-openwrt.
 
-2. **Версия OpenWrt.**
-   `BASE=.../v25.12.2` в `01-amneziawg.sh` и `post-upgrade.sh` — фиксированная ссылка на релиз awg-openwrt. При обновлении OpenWrt обновляйте и эту переменную.
-
-3. **Подсеть LAN.**
-   `192.168.1.0/24` прошито в `02-podkop.sh` (`fully_routed_ips`) и `07-killswitch.sh` (`src_ip`). Если у вас другая подсеть — замените.
-
-4. **Физическая кнопка переключения режимов.**
+2. **Физическая кнопка переключения режимов.**
    Работает на любом роутере, где OpenWrt настроил `gpio_button_hotplug` (Cudy TR3000, Beryl AX, большинство современных моделей). На роутерах без кнопки — переключайте режим через CLI: `vpn-mode home` / `vpn-mode travel`.
 
-5. **OpenWrt 23.05/24.10 (с `opkg` вместо `apk`).**
-   Замените `apk add` на `opkg install` + обновите URL-ы для kmod (снапшоты openwrt.org).
+3. **OpenWrt 23.05/24.10 (с `opkg` вместо `apk`).**
+   Замените `apk add` на `opkg install` + обновите URL-ы для kmod (снапшоты openwrt.org). Тестировано на OpenWrt 25.12+.
 
 ## После установки — проверка
 
