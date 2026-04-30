@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""mock jsonfilter — реализует подмножество flagов нужное rpcd-cheburnet.
+
+rpcd-cheburnet вызывает только: jsonfilter -e '@.field'
+Это эквивалент `python json.load(stdin)['field']` (или вложенный путь @.a.b).
+"""
+import json
+import sys
+
+
+def get_path(data, path):
+    # path = "@.foo.bar" → ["foo", "bar"]
+    parts = path.lstrip("@").lstrip(".").split(".")
+    for p in parts:
+        if p == "":
+            continue
+        if isinstance(data, dict) and p in data:
+            data = data[p]
+        else:
+            return None
+    return data
+
+
+args = sys.argv[1:]
+expr = None
+i = 0
+while i < len(args):
+    if args[i] == "-e":
+        expr = args[i + 1]
+        i += 2
+        continue
+    if args[i].startswith("-"):
+        i += 1
+        continue
+    i += 1
+
+if expr is None:
+    sys.exit(0)
+
+try:
+    raw = sys.stdin.read()
+    data = json.loads(raw) if raw.strip() else {}
+except Exception:
+    sys.exit(1)
+
+result = get_path(data, expr)
+if result is None:
+    sys.exit(0)  # пустой stdout — стандартное поведение jsonfilter
+
+if isinstance(result, bool):
+    print("true" if result else "false")
+elif isinstance(result, (dict, list)):
+    print(json.dumps(result))
+else:
+    print(result)

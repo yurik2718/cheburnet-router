@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# mock uci — минимальная реализация для нужд rpcd-cheburnet.
+# Хранит «UCI-state» в $FAKE_ROOT/uci-state (key=value, по строке).
+# Поддерживает: get, set, -q get, commit (no-op), show (для grep'а),
+# add_list (no-op), delete (no-op).
+
+echo "$@" >> "${CALLS_DIR:-/tmp}/uci"
+
+STATE="${FAKE_ROOT:?FAKE_ROOT not set}/uci-state"
+touch "$STATE"
+
+# Парсим -q (quiet — игнорируем, всегда тихо)
+QUIET=0
+while [ "$1" = "-q" ]; do
+    QUIET=1
+    shift
+done
+
+cmd="$1"; shift
+
+case "$cmd" in
+    get)
+        key="$1"
+        val="$(grep -F "^${key}=" "$STATE" 2>/dev/null | head -1 | cut -d= -f2-)"
+        # grep с ^ требует -E или -P; используем awk для простоты:
+        val="$(awk -F= -v k="$key" '$1==k{ $1=""; sub(/^=/,""); print; exit }' "$STATE")"
+        if [ -n "$val" ]; then
+            printf '%s\n' "$val"
+            exit 0
+        fi
+        # default-ы для известных ключей
+        case "$key" in
+            network.lan.ipaddr) echo "192.168.1.1"; exit 0 ;;
+            wireless.default_radio0.ssid) echo ""; exit 0 ;;
+        esac
+        [ "$QUIET" = "1" ] && exit 1
+        echo "uci: Entry not found" >&2
+        exit 1
+        ;;
+    set)
+        # foo.bar.baz=value
+        kv="$1"
+        key="${kv%%=*}"
+        val="${kv#*=}"
+        # remove existing
+        grep -v "^${key}=" "$STATE" > "${STATE}.new" 2>/dev/null || true
+        mv "${STATE}.new" "$STATE"
+        printf '%s=%s\n' "$key" "$val" >> "$STATE"
+        ;;
+    add_list|add|delete|commit|reorder|rename)
+        : # no-op для теста
+        ;;
+    show)
+        # Используется в run-install.sh для grep'а Block-SSH-from-WAN.
+        # Ничего не печатаем — пусть grep вернёт false, мок-флоу простой.
+        :
+        ;;
+    *)
+        # неизвестный — тихо OK
+        :
+        ;;
+esac
+exit 0

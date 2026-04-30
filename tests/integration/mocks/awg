@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# mock awg — поддерживает только `awg show awg0 latest-handshakes` и
+# `awg show awg0` (для get_status).
+echo "$@" >> "${CALLS_DIR:-/tmp}/awg"
+
+# По умолчанию — нет handshake. Тест может переопределить через
+# $FAKE_ROOT/awg-handshake (содержит unix-timestamp).
+HS_FILE="${FAKE_ROOT:?}/awg-handshake"
+
+case "$2:$3" in
+    awg0:latest-handshakes)
+        if [ -f "$HS_FILE" ]; then
+            ts="$(cat "$HS_FILE")"
+            printf 'PUBLICKEYHEX\t%s\n' "$ts"
+        else
+            printf 'PUBLICKEYHEX\t0\n'
+        fi
+        ;;
+    awg0:)
+        if [ -f "$HS_FILE" ]; then
+            ts="$(cat "$HS_FILE")"
+            ago="$(( $(date +%s) - ts ))"
+            echo "interface: awg0"
+            echo "  latest handshake: ${ago} seconds ago"
+        else
+            echo "interface: awg0"
+            echo "  (no handshake)"
+        fi
+        ;;
+esac
+exit 0

@@ -5,7 +5,14 @@
       "Bash(sh -n /home/pingvinus/cheburnet-router/bootstrap.sh)",
       "Bash(sh -n /home/pingvinus/cheburnet-router/web/run-install.sh)",
       "Bash(sh -n /home/pingvinus/cheburnet-router/web/rpcd-cheburnet)",
-      "Bash(sh -n /home/pingvinus/cheburnet-router/setup/full-deploy.sh)"
+      "Bash(sh -n /home/pingvinus/cheburnet-router/setup/full-deploy.sh)",
+      "Bash(command -v qemu-system-x86_64)",
+      "Bash(qemu-system-x86_64 --version)",
+      "Bash(command -v expect)",
+      "Bash(expect -v)",
+      "Bash(command -v ssh)",
+      "Bash(command -v sshpass)",
+      "Read(//dev/**)"
     ]
   }
 }

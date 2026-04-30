@@ -113,6 +113,7 @@ mkdir -p "$INSTALL_DIR"
 cp -r "$SRC/setup"    "$INSTALL_DIR/"
 cp -r "$SRC/scripts"  "$INSTALL_DIR/"
 cp -r "$SRC/configs"  "$INSTALL_DIR/"
+cp -r "$SRC/lib"      "$INSTALL_DIR/"
 # run-install.sh + rpcd-handler поставляются в web/
 cp "$SRC/web/run-install.sh" "$INSTALL_DIR/run-install.sh"
 chmod +x "$INSTALL_DIR/run-install.sh"

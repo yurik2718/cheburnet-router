@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# mock wget — для bootstrap.sh internet-check и для awg-pkg-download.
+# По умолчанию: --spider (HEAD-check) → success. -qO source.tar.gz → создаёт
+# файл-заглушку. Полный download → не нужен в integration-тестах rpcd.
+echo "$@" >> "${CALLS_DIR:-/tmp}/wget"
+
+mode=""
+output=""
+url=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --spider) mode="spider" ;;
+        -q|--quiet) ;;
+        --timeout=*) ;;
+        -O) output="$2"; shift ;;
+        -qO) output="${1#-qO}"; [ -z "$output" ] && output="$2" && shift ;;
+        --) shift; break ;;
+        -*) ;;
+        *) url="$1" ;;
+    esac
+    shift
+done
+
+# Spider — успех, если URL не в blacklist
+if [ "$mode" = "spider" ]; then
+    if [ -f "${FAKE_ROOT:?}/wget-deny-urls" ] && grep -qF "$url" "${FAKE_ROOT}/wget-deny-urls"; then
+        exit 1
+    fi
+    exit 0
+fi
+
+# Download — пишем заглушку
+if [ -n "$output" ]; then
+    : > "$output"
+fi
+exit 0

@@ -11,6 +11,12 @@ set -e
 
 echo "== 01. AmneziaWG =="
 
+# Подключаем общие pure-функции (awg_get_iface, awg_pick_version и др.)
+LIB="${CHEBURNET_LIB:-/opt/cheburnet/lib/cheburnet-utils.sh}"
+[ -f "$LIB" ] || LIB="$(dirname "$0")/../lib/cheburnet-utils.sh"
+# shellcheck source=../lib/cheburnet-utils.sh disable=SC1090,SC1091
+. "$LIB"
+
 CONF=/etc/amnezia/amneziawg/awg0.conf
 if [ ! -f "$CONF" ]; then
     echo "ERROR: $CONF не найден." >&2
@@ -38,15 +44,7 @@ else
     ARCH="${DISTRIB_ARCH}_$(echo "$DISTRIB_TARGET" | tr '/' '_')"
 
     # Версия пакетов awg-openwrt: пробуем v$DISTRIB_RELEASE, fallback v25.12.2
-    AWG_VER=""
-    for TRY in "$DISTRIB_RELEASE" "25.12.2"; do
-        [ -z "$TRY" ] && continue
-        URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/v${TRY}/kmod-amneziawg_v${TRY}_${ARCH}.apk"
-        if wget -q --spider --timeout=15 "$URL" 2>/dev/null; then
-            AWG_VER="$TRY"
-            break
-        fi
-    done
+    AWG_VER="$(awg_pick_version "$DISTRIB_RELEASE" "$ARCH")" || AWG_VER=""
     if [ -z "$AWG_VER" ]; then
         echo "✗ Нет совместимого релиза awg-openwrt для OpenWrt ${DISTRIB_RELEASE} / ${ARCH}." >&2
         echo "  Доступные релизы: https://github.com/Slava-Shchipunov/awg-openwrt/releases" >&2
@@ -69,37 +67,34 @@ else
 fi
 
 # === 2. Парсим .conf ===
-get_iface() { awk -F' *= *' "/^$1/{print \$2; exit}" "$CONF" | head -n1; }
-get_peer()  { awk -F' *= *' "BEGIN{f=0} /^\\[Peer\\]/{f=1; next} f && /^$1/{print \$2; exit}" "$CONF"; }
-
-PRIV=$(get_iface PrivateKey)
-ADDR=$(get_iface Address)
-JC=$(get_iface Jc)
-JMIN=$(get_iface Jmin)
-JMAX=$(get_iface Jmax)
-S1=$(get_iface S1)
-S2=$(get_iface S2)
+PRIV=$(awg_get_iface PrivateKey "$CONF")
+ADDR=$(awg_get_iface Address    "$CONF")
+JC=$(awg_get_iface Jc           "$CONF")
+JMIN=$(awg_get_iface Jmin       "$CONF")
+JMAX=$(awg_get_iface Jmax       "$CONF")
+S1=$(awg_get_iface S1           "$CONF")
+S2=$(awg_get_iface S2           "$CONF")
 # v1.5 опциональные параметры (могут отсутствовать в v1.0 конфигах):
-S3=$(get_iface S3)
-S4=$(get_iface S4)
-H1=$(get_iface H1)
-H2=$(get_iface H2)
-H3=$(get_iface H3)
-H4=$(get_iface H4)
+S3=$(awg_get_iface S3           "$CONF")
+S4=$(awg_get_iface S4           "$CONF")
+H1=$(awg_get_iface H1           "$CONF")
+H2=$(awg_get_iface H2           "$CONF")
+H3=$(awg_get_iface H3           "$CONF")
+H4=$(awg_get_iface H4           "$CONF")
 # I1-I5 — Custom Protocol Signature (AWG v1.5), опционально:
-I1=$(get_iface I1)
-I2=$(get_iface I2)
-I3=$(get_iface I3)
-I4=$(get_iface I4)
-I5=$(get_iface I5)
+I1=$(awg_get_iface I1           "$CONF")
+I2=$(awg_get_iface I2           "$CONF")
+I3=$(awg_get_iface I3           "$CONF")
+I4=$(awg_get_iface I4           "$CONF")
+I5=$(awg_get_iface I5           "$CONF")
 
-PUB=$(get_peer PublicKey)
-PSK=$(get_peer PresharedKey)
-EP=$(get_peer Endpoint)
-KA=$(get_peer PersistentKeepalive)
-# Split endpoint host:port
-EP_HOST=${EP%:*}
-EP_PORT=${EP##*:}
+PUB=$(awg_get_peer PublicKey           "$CONF")
+PSK=$(awg_get_peer PresharedKey        "$CONF")
+EP=$(awg_get_peer Endpoint             "$CONF")
+KA=$(awg_get_peer PersistentKeepalive  "$CONF")
+# Split endpoint host:port (поддерживает IPv6 [::1]:51820)
+EP_HOST=$(awg_endpoint_host "$EP")
+EP_PORT=$(awg_endpoint_port "$EP")
 
 [ -n "$PRIV" ] && [ -n "$PUB" ] && [ -n "$EP_HOST" ] || { echo "ERROR: .conf parse failed"; exit 1; }
 

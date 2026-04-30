@@ -18,12 +18,13 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO"
+cd "$REPO" || exit 1
 
 # === Списки файлов ===
 # POSIX sh — всё что идёт на роутер (busybox-ash) или на хост, но без bash-фич.
 POSIX_FILES=(
     bootstrap.sh
+    lib/cheburnet-utils.sh
     web/run-install.sh
     web/rpcd-cheburnet
     setup/00-prerequisites.sh
@@ -66,6 +67,39 @@ POSIX_FILES=(
 
 BASH_FILES=(
     setup.sh
+    tests/lint.sh
+    tests/helpers/setup.bash
+    tests/integration/helpers/sandbox.bash
+    tests/integration/mocks/uci
+    tests/integration/mocks/awg
+    tests/integration/mocks/wget
+    tests/integration/mocks/nslookup
+    tests/integration/mocks/apk
+    tests/integration/mocks/awg-quick
+    tests/integration/mocks/firstboot
+    tests/integration/mocks/ifup
+    tests/integration/mocks/ifdown
+    tests/integration/mocks/logger
+    tests/integration/mocks/lsmod
+    tests/integration/mocks/modprobe
+    tests/integration/mocks/passwd
+    tests/integration/mocks/reboot
+    tests/integration/mocks/setsid
+)
+
+# .bats-файлы прогоняются bats-парсером, но как обычный bash они тоже должны
+# быть валидны. Shellcheck с --shell=bash на них работает (через `--ext=bats`
+# не нужно — bats-синтаксис надмножество bash).
+BATS_FILES=(
+    tests/unit/test_json_escape.bats
+    tests/unit/test_awg_conf_parser.bats
+    tests/unit/test_awg_version_selection.bats
+    tests/unit/test_input_validation.bats
+    tests/integration/test_get_status.bats
+    tests/integration/test_install_start.bats
+    tests/integration/test_mutations.bats
+    tests/integration/test_acl_lockdown.bats
+    tests/integration/test_protocol.bats
 )
 
 # === Цветовой helper ===
@@ -99,6 +133,17 @@ if command -v shellcheck >/dev/null 2>&1; then
         ok "${#BASH_FILES[@]} bash-файлов чисты"
     else
         fail "shellcheck warnings в bash-файлах"
+    fi
+
+    # .bats — надмножество bash (макрос @test переписывается в функции при
+    # выполнении). Shellcheck парсит их как bash и ловит опечатки/quoting.
+    # SC2317 (unused command) глушим: bats-функции не вызываются напрямую,
+    # их исполняет сам bats-runner.
+    if shellcheck --shell=bash --severity=warning --external-sources \
+            --exclude=SC2317 "${BATS_FILES[@]}"; then
+        ok "${#BATS_FILES[@]} .bats-файлов чисты"
+    else
+        fail "shellcheck warnings в .bats-файлах"
     fi
 fi
 

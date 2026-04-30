@@ -93,7 +93,7 @@ flowchart LR
 ```bash
 ssh root@192.168.1.1 'BS=/tmp/bootstrap.sh && \
   wget -qO "$BS" https://raw.githubusercontent.com/yurik2718/cheburnet-router/main/bootstrap.sh && \
-  echo "5433b1ee4426e13bdb60735c8542bf12b3801d34da71ab546e80ffee26219df9  $BS" | sha256sum -c - && \
+  echo "221d1e57389f6c3030d5e2587c6b90d0864f318664209ed6fff3bdebcc7b3bfa  $BS" | sha256sum -c - && \
   sh "$BS"'
 ```
 

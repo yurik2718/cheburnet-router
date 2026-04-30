@@ -13,30 +13,32 @@
 # Протокол rpcd: скрипт вызывается с аргументами `list` или `call <method>`.
 # В режиме `call` аргументы метода читаются из stdin как JSON.
 
-INSTALL_DIR="/opt/cheburnet"
-STATE_DIR="/tmp/cheburnet"
+INSTALL_DIR="${INSTALL_DIR:-/opt/cheburnet}"
+STATE_DIR="${STATE_DIR:-/tmp/cheburnet}"
 LOG_FILE="$STATE_DIR/install.log"
 STATE_FILE="$STATE_DIR/state"
 DONE_FILE="$STATE_DIR/done"
 PID_FILE="$STATE_DIR/pid"
 
+# Системные пути роутера. По умолчанию — стандартные OpenWrt-локации;
+# integration-тесты переопределяют их через env, чтобы запустить скрипт в
+# sandbox без реального /etc /usr и /etc/init.d.
+ETC_CHEBURNET="${ETC_CHEBURNET:-/etc/cheburnet}"
+ETC_AWG_DIR="${ETC_AWG_DIR:-/etc/amnezia/amneziawg}"
+ETC_ADBLOCK_CFG="${ETC_ADBLOCK_CFG:-/etc/adblock-lean/config}"
+ETC_INIT_D="${ETC_INIT_D:-/etc/init.d}"
+ETC_VPN_MODE_STATE="${ETC_VPN_MODE_STATE:-/etc/vpn-mode.state}"
+USR_BIN_VPN_MODE="${USR_BIN_VPN_MODE:-/usr/bin/vpn-mode}"
+
 mkdir -p "$STATE_DIR"
 
-# === Вспомогательные функции ===
-# Экранирование произвольной строки для безопасной вставки в JSON-литерал.
-# Делает: \ → \\, " → \", переносы строк → \n, tab → \t.
-# Используется ВЕЗДЕ где пользовательские/uci-данные подставляются в JSON-ответ.
-json_escape() {
-    printf '%s' "$1" | awk 'BEGIN{ORS=""}
-        {
-            gsub(/\\/, "\\\\");
-            gsub(/"/, "\\\"");
-            gsub(/\t/, "\\t");
-            gsub(/\r/, "");
-            if (NR > 1) printf "\\n";
-            print
-        }'
-}
+# === Подключаем общие pure-функции (json_escape, валидаторы) ===
+# Файл ставится bootstrap.sh в /opt/cheburnet/lib/. Fallback на относительный
+# путь — для запуска из репо-чекаута (тесты, отладка).
+LIB="${CHEBURNET_LIB:-$INSTALL_DIR/lib/cheburnet-utils.sh}"
+[ -f "$LIB" ] || LIB="$(dirname "$0")/../../../opt/cheburnet/lib/cheburnet-utils.sh"
+# shellcheck source=../lib/cheburnet-utils.sh disable=SC1090,SC1091
+. "$LIB"
 
 # === list: описание доступных методов ===
 if [ "$1" = "list" ]; then
@@ -80,11 +82,11 @@ case "$METHOD" in
 
     # ------------------------------------------------------------------
     get_status)
-        MODE=$(cat /etc/vpn-mode.state 2>/dev/null || echo "unknown")
+        MODE=$(cat "$ETC_VPN_MODE_STATE" 2>/dev/null || echo "unknown")
 
         # Определяем тип установки
         INSTALL_TYPE="none"
-        if [ -f /etc/amnezia/amneziawg/awg0.conf ] && [ -x /etc/init.d/podkop ]; then
+        if [ -f "$ETC_AWG_DIR/awg0.conf" ] && [ -x "$ETC_INIT_D/podkop" ]; then
             INSTALL_TYPE="vpn"
         fi
 
@@ -94,16 +96,16 @@ case "$METHOD" in
 
         # Сервисы running?
         ADBLOCK_UP="false"
-        /etc/init.d/adblock-lean status 2>&1 | grep -qi running && ADBLOCK_UP="true"
+        "$ETC_INIT_D/adblock-lean" status 2>&1 | grep -qi running && ADBLOCK_UP="true"
 
         PODKOP_UP="false"
-        /etc/init.d/sing-box status 2>&1 | grep -qi running && PODKOP_UP="true"
+        "$ETC_INIT_D/sing-box" status 2>&1 | grep -qi running && PODKOP_UP="true"
 
         # DNS — отдельный probe: dnsmasq running + резолвится тестовый домен
         # Лейбл «DNS (DoH)» в UI описывает работу sing-box-DoH через dnsmasq;
         # podkop_up недостаточен — dnsmasq может упасть отдельно.
         DNS_UP="false"
-        if /etc/init.d/dnsmasq status 2>&1 | grep -qi running; then
+        if "$ETC_INIT_D/dnsmasq" status 2>&1 | grep -qi running; then
             LAN_IP=$(uci -q get network.lan.ipaddr || echo "127.0.0.1")
             if nslookup cloudflare.com "$LAN_IP" 2>/dev/null | grep -q Address; then
                 DNS_UP="true"
@@ -123,13 +125,13 @@ case "$METHOD" in
         MODE_ESC=$(json_escape "$MODE")
 
         # Текущий тир Hagezi из adblock-lean config
-        TIER_RAW=$(grep -E '^raw_block_lists=' /etc/adblock-lean/config 2>/dev/null \
+        TIER_RAW=$(grep -E '^raw_block_lists=' "$ETC_ADBLOCK_CFG" 2>/dev/null \
             | sed -e 's/^raw_block_lists="\?//' -e 's/"\?$//' -e 's/hagezi://' | head -1)
         TIER=$(json_escape "${TIER_RAW:-pro}")
 
         # Признак pre-install режима: токен на месте — значит ждём install_start
         TOKEN_PRESENT="false"
-        [ -s /etc/cheburnet/install-token ] && TOKEN_PRESENT="true"
+        [ -s "$ETC_CHEBURNET/install-token" ] && TOKEN_PRESENT="true"
 
         cat <<EOF
 {
@@ -160,7 +162,7 @@ EOF
         # выданный bootstrap.sh в /etc/cheburnet/install-token. После успешной
         # установки run-install.sh удаляет файл — повторно установить нельзя
         # без нового bootstrap-запуска.
-        TOKEN_FILE=/etc/cheburnet/install-token
+        TOKEN_FILE="$ETC_CHEBURNET/install-token"
         if [ ! -s "$TOKEN_FILE" ]; then
             echo '{"error": "install token not found — router is already installed or bootstrap.sh did not run. Re-run bootstrap.sh via SSH to get a new token."}'
             exit 0
@@ -192,9 +194,9 @@ EOF
         echo "$AWG_CONF" | grep -q '\[Peer\]'      || { echo '{"error": "awg_conf does not contain [Peer] section"}'; exit 0; }
 
         # Сохраняем .conf для 01-amneziawg.sh
-        mkdir -p /etc/amnezia/amneziawg
-        printf '%s\n' "$AWG_CONF" > /etc/amnezia/amneziawg/awg0.conf
-        chmod 600 /etc/amnezia/amneziawg/awg0.conf
+        mkdir -p "$ETC_AWG_DIR"
+        printf '%s\n' "$AWG_CONF" > "$ETC_AWG_DIR/awg0.conf"
+        chmod 600 "$ETC_AWG_DIR/awg0.conf"
 
         # Передаём root-пароль run-install.sh через короткоживущий файл (chmod 600)
         umask 077
@@ -281,17 +283,16 @@ EOF
     # ------------------------------------------------------------------
     mode_switch)
         NEW_MODE=$(jf '@.mode')
-        case "$NEW_MODE" in
-            home|travel) ;;
-            *) echo '{"error": "mode must be home or travel"}'; exit 0 ;;
-        esac
+        if ! cheburnet_valid_mode "$NEW_MODE"; then
+            echo '{"error": "mode must be home or travel"}'; exit 0
+        fi
 
-        if [ ! -x /usr/bin/vpn-mode ]; then
+        if [ ! -x "$USR_BIN_VPN_MODE" ]; then
             echo '{"error": "vpn-mode CLI not installed — установите VPN-режим"}'
             exit 0
         fi
 
-        OUT=$(/usr/bin/vpn-mode "$NEW_MODE" 2>&1) || {
+        OUT=$("$USR_BIN_VPN_MODE" "$NEW_MODE" 2>&1) || {
             echo "{\"error\": \"vpn-mode $NEW_MODE failed\", \"output\": \"$(echo "$OUT" | tr '\n' ' ')\"}"
             exit 0
         }
@@ -305,16 +306,16 @@ EOF
             vpn)
                 # Полный рестарт VPN-стека
                 ifdown awg0 2>/dev/null; sleep 1; ifup awg0 2>/dev/null
-                /etc/init.d/podkop restart >/dev/null 2>&1 &
+                "$ETC_INIT_D/podkop" restart >/dev/null 2>&1 &
                 echo '{"status": "vpn restarting"}'
                 ;;
             dns)
-                /etc/init.d/dnsmasq restart >/dev/null 2>&1
+                "$ETC_INIT_D/dnsmasq" restart >/dev/null 2>&1
                 echo '{"status": "dns restarted"}'
                 ;;
             adblock)
-                /etc/init.d/adblock-lean start >/dev/null 2>&1
-                /etc/init.d/dnsmasq restart >/dev/null 2>&1
+                "$ETC_INIT_D/adblock-lean" start >/dev/null 2>&1
+                "$ETC_INIT_D/dnsmasq" restart >/dev/null 2>&1
                 echo '{"status": "adblock reloaded"}'
                 ;;
             *)
@@ -326,23 +327,20 @@ EOF
     # ------------------------------------------------------------------
     set_blocklist_tier)
         TIER=$(jf '@.tier')
-        # Допустимые тиры hagezi (см. https://github.com/hagezi/dns-blocklists)
-        case "$TIER" in
-            light|normal|pro|pro.plus|ultimate|tif|tif.medium|tif.mini|multi.pro|fake) ;;
-            *) echo '{"error": "tier must be one of: light, normal, pro, pro.plus, ultimate, tif, tif.medium, tif.mini, multi.pro, fake"}'; exit 0 ;;
-        esac
+        if ! cheburnet_valid_tier "$TIER"; then
+            echo '{"error": "tier must be one of: light, normal, pro, pro.plus, ultimate, tif, tif.medium, tif.mini, multi.pro, fake"}'; exit 0
+        fi
 
-        CONFIG=/etc/adblock-lean/config
-        if [ ! -f "$CONFIG" ]; then
+        if [ ! -f "$ETC_ADBLOCK_CFG" ]; then
             echo '{"error": "adblock-lean config not found — установка не завершена"}'; exit 0
         fi
 
         # Заменяем строку raw_block_lists=... в конфиге
-        sed -i "s|^raw_block_lists=.*|raw_block_lists=\"hagezi:${TIER}\"|" "$CONFIG"
+        sed -i "s|^raw_block_lists=.*|raw_block_lists=\"hagezi:${TIER}\"|" "$ETC_ADBLOCK_CFG"
 
         # Перегенерируем блок-лист (запускается в фоне — не блокирует RPC-ответ)
-        ( /etc/init.d/adblock-lean start >/dev/null 2>&1
-          /etc/init.d/dnsmasq restart >/dev/null 2>&1 ) &
+        ( "$ETC_INIT_D/adblock-lean" start >/dev/null 2>&1
+          "$ETC_INIT_D/dnsmasq" restart >/dev/null 2>&1 ) &
 
         TIER_ESC=$(json_escape "$TIER")
         echo "{\"status\": \"tier set\", \"tier\": \"$TIER_ESC\"}"
@@ -352,7 +350,7 @@ EOF
     factory_reset)
         # Защита от случайного срабатывания: confirm должен быть строго "RESET"
         CONFIRM=$(jf '@.confirm')
-        if [ "$CONFIRM" != "RESET" ]; then
+        if ! cheburnet_valid_factory_confirm "$CONFIRM"; then
             echo '{"error": "confirm must be exactly \"RESET\""}'; exit 0
         fi
 

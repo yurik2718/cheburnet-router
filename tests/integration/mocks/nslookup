@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# mock nslookup — для DNS-probe в get_status.
+# По умолчанию резолвит успешно. Тест может выключить через файл
+# $FAKE_ROOT/dns-broken — тогда возвращаем failure.
+echo "$@" >> "${CALLS_DIR:-/tmp}/nslookup"
+
+if [ -f "${FAKE_ROOT:?}/dns-broken" ]; then
+    echo "** server can't find $1: NXDOMAIN" >&2
+    exit 1
+fi
+
+cat <<EOF
+Server:    127.0.0.1
+Address 1: 127.0.0.1
+
+Name:      $1
+Address 1: 1.2.3.4
+EOF
+exit 0
