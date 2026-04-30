@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# _record-and-pass — общий no-op мок для integration-тестов.
+#
+# Используется через симлинк: ln -s _record-and-pass apk; ln -s _record-and-pass reboot; и т.д.
+# Имя команды берётся из $0 (базовое имя симлинка). Аргументы записываются в
+# $CALLS_DIR/<command-name>, по одной строке на вызов. Exit 0 всегда.
+#
+# Когда этот шаблон НЕ подходит — пиши отдельный мок с поведением (см. uci, awg, wget, jsonfilter, nslookup).
+echo "$@" >> "${CALLS_DIR:-/tmp}/$(basename "$0")"
+exit 0

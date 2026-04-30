@@ -93,9 +93,11 @@ sandbox_cleanup() {
 # Подготовка состояния роутера
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Создать install-токен (как это делает bootstrap.sh)
+# Создать install-токен (как это делает bootstrap.sh, но через od вместо hexdump,
+# чтобы не зависеть от bsdmainutils-пакета — на минимальных Ubuntu CI runner'ах
+# hexdump может отсутствовать. od входит в coreutils и есть везде.).
 sandbox_set_token() {
-    local token="${1:-$(head -c 16 /dev/urandom | hexdump -e '16/1 "%02x"')}"
+    local token="${1:-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}"
     printf '%s' "$token" > "$FAKE_ROOT/etc/cheburnet/install-token"
     chmod 600 "$FAKE_ROOT/etc/cheburnet/install-token"
     echo "$token"
@@ -209,4 +211,48 @@ assert_mock_called() {
         cat "$CALLS_DIR/$cmd"
         return 1
     fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ACL-парсер (для test_acl_lockdown.bats)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Общий код парсера: вход — JSON через stdin, путь — argv[1].
+# Печатает sorted-методы через пробел. Используется обоими acl_methods*-врапперами.
+# Через python3 -c '...' (не heredoc!) — иначе heredoc переопределит pipe-stdin
+# и acl_methods_in_stdin не получит JSON через pipe.
+_ACL_PARSER='
+import json, sys
+data = json.load(sys.stdin)
+parts = sys.argv[1].lstrip(".").split(".")
+for p in parts:
+    if isinstance(data, dict) and p in data:
+        data = data[p]
+    else:
+        sys.exit(1)
+if not isinstance(data, list):
+    sys.exit(1)
+print(" ".join(sorted(data)))
+'
+
+# acl_methods FILE JQ_PATH
+# Печатает методы по jq-пути в ACL-JSON, через пробел, отсортированные.
+# Возвращает 1 (с пустым stdout) если путь не существует или JSON невалидный.
+# Пример: acl_methods web/rpcd-acl.json .unauthenticated.write.ubus.cheburnet
+acl_methods() {
+    python3 -c "$_ACL_PARSER" "$2" < "$1"
+}
+
+# acl_methods_in_stdin JQ_PATH
+# То же, но JSON читается из stdin (для embedded-heredoc'ов).
+acl_methods_in_stdin() {
+    python3 -c "$_ACL_PARSER" "$1"
+}
+
+# Печатает true/false: есть ли значение в массиве по jq-пути.
+# acl_has FILE JQ_PATH VALUE
+acl_has() {
+    local methods
+    methods="$(acl_methods "$1" "$2")" || return 1
+    case " $methods " in *" $3 "*) return 0 ;; *) return 1 ;; esac
 }

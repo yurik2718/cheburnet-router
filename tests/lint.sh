@@ -65,42 +65,31 @@ POSIX_FILES=(
     backup/restore.sh
 )
 
-BASH_FILES=(
-    setup.sh
-    tests/lint.sh
-    tests/helpers/setup.bash
-    tests/integration/helpers/sandbox.bash
-    tests/integration/mocks/uci
-    tests/integration/mocks/awg
-    tests/integration/mocks/wget
-    tests/integration/mocks/nslookup
-    tests/integration/mocks/apk
-    tests/integration/mocks/awg-quick
-    tests/integration/mocks/firstboot
-    tests/integration/mocks/ifup
-    tests/integration/mocks/ifdown
-    tests/integration/mocks/logger
-    tests/integration/mocks/lsmod
-    tests/integration/mocks/modprobe
-    tests/integration/mocks/passwd
-    tests/integration/mocks/reboot
-    tests/integration/mocks/setsid
-)
+# BASH_FILES и BATS_FILES — собираются автоматически через find, чтобы новые
+# моки/тесты не требовали ручной правки lint.sh (single source of truth = ФС).
+# jsonfilter и nslookup — bash-script с #!/usr/bin/env python3 / bash; первый
+# исключаем, второй включаем по shebang'у.
+#
+# Для надёжной работы в read-only checkout'е: find отбирает по содержимому
+# файла (shebang), не по имени.
 
-# .bats-файлы прогоняются bats-парсером, но как обычный bash они тоже должны
-# быть валидны. Shellcheck с --shell=bash на них работает (через `--ext=bats`
-# не нужно — bats-синтаксис надмножество bash).
-BATS_FILES=(
-    tests/unit/test_json_escape.bats
-    tests/unit/test_awg_conf_parser.bats
-    tests/unit/test_awg_version_selection.bats
-    tests/unit/test_input_validation.bats
-    tests/integration/test_get_status.bats
-    tests/integration/test_install_start.bats
-    tests/integration/test_mutations.bats
-    tests/integration/test_acl_lockdown.bats
-    tests/integration/test_protocol.bats
-)
+BASH_FILES=( setup.sh tests/lint.sh )
+while IFS= read -r f; do
+    # Пропускаем shellcheck-вендоров, симлинки разрешаем
+    case "$f" in
+        */vendor/*) continue ;;
+    esac
+    case "$(head -1 "$f" 2>/dev/null)" in
+        '#!/usr/bin/env bash'|'#!/bin/bash'|'#!/usr/bin/bash')
+            BASH_FILES+=("$f") ;;
+    esac
+done < <(find tests/helpers tests/integration -type f,l \
+            \( -name '*.bash' -o -name '*' \) 2>/dev/null \
+            | sort -u)
+
+# .bats — надмножество bash; shellcheck на них работает с --shell=bash.
+mapfile -t BATS_FILES < <(find tests -type f -name '*.bats' \
+    -not -path 'tests/vendor/*' | sort)
 
 # === Цветовой helper ===
 if [ -t 1 ]; then

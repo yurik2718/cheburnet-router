@@ -21,8 +21,6 @@ cmd="$1"; shift
 case "$cmd" in
     get)
         key="$1"
-        val="$(grep -F "^${key}=" "$STATE" 2>/dev/null | head -1 | cut -d= -f2-)"
-        # grep с ^ требует -E или -P; используем awk для простоты:
         val="$(awk -F= -v k="$key" '$1==k{ $1=""; sub(/^=/,""); print; exit }' "$STATE")"
         if [ -n "$val" ]; then
             printf '%s\n' "$val"

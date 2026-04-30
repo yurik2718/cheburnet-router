@@ -1,3 +1,1 @@
-#!/usr/bin/env bash
-echo "$@" >> "${CALLS_DIR:-/tmp}/modprobe"
-exit 0
+_record-and-pass
