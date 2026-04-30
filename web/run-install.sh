@@ -77,21 +77,44 @@ for STEP in $STEPS; do
 done
 
 # === Постобработка ===
-# SSH hardening (09) в веб-флоу пропускаем: пользователь мог не положить SSH-ключ
-# до bootstrap. Если авторизация уже сконфигурена ключом — запускаем отдельно ниже.
-if [ -s /etc/dropbear/authorized_keys ]; then
-    echo "[STEP] 09-ssh-hardening" > "$STATE"
-    echo
-    echo "════════════════════════════════════════════"
-    echo " ШАГ: 09-ssh-hardening.sh (authorized_keys не пусты — ужесточаем SSH)"
-    echo "════════════════════════════════════════════"
-    sh "$INSTALL_DIR/setup/09-ssh-hardening.sh" || {
-        echo "⚠ 09-ssh-hardening.sh не прошёл — оставляем как было"
-    }
+# SSH hardening: даже без ssh-key всегда блокируем SSH с WAN-зоны
+# (минимальная защита от внешнего доступа). Выключение password-auth — только
+# если есть authorized_keys (иначе пользователь потеряет recovery-доступ через пароль).
+echo "[STEP] 09-ssh-hardening" > "$STATE"
+echo
+echo "════════════════════════════════════════════"
+echo " ШАГ: 09-ssh-hardening (Block-SSH-from-WAN всегда; password-auth — если есть ключ)"
+echo "════════════════════════════════════════════"
+
+# Block-SSH-from-WAN — добавляем безусловно
+if uci show firewall 2>/dev/null | grep -q "name='Block-SSH-from-WAN'"; then
+    echo "→ Block-SSH-from-WAN правило уже есть"
 else
-    echo
-    echo "ℹ SSH hardening пропущен: /etc/dropbear/authorized_keys пуст."
-    echo "  Если хотите использовать удалённый SSH — добавьте свой публичный ключ вручную."
+    echo "→ добавляем Block-SSH-from-WAN (REJECT tcp/22 from wan zone)"
+    uci add firewall rule
+    uci set firewall.@rule[-1].name='Block-SSH-from-WAN'
+    uci set firewall.@rule[-1].src='wan'
+    uci set firewall.@rule[-1].proto='tcp'
+    uci set firewall.@rule[-1].dest_port='22'
+    uci set firewall.@rule[-1].target='REJECT'
+    uci commit firewall
+    /etc/init.d/firewall reload >/dev/null 2>&1
+fi
+
+# Выключение password-auth — только при наличии ключа, иначе остаёмся с паролем
+if [ -s /etc/dropbear/authorized_keys ]; then
+    echo "→ authorized_keys не пуст — выключаем password-auth в dropbear"
+    uci set dropbear.main.PasswordAuth='off'
+    uci set dropbear.main.RootPasswordAuth='off'
+    uci commit dropbear
+    /etc/init.d/dropbear restart >/dev/null 2>&1
+    echo "✓ SSH hardening полный (key-only + WAN closed)"
+else
+    echo "ℹ password-auth оставлен включённым: authorized_keys пуст,"
+    echo "  иначе вы потеряли бы recovery-доступ через пароль root."
+    echo "  Добавьте свой ssh-key в /etc/dropbear/authorized_keys и запустите"
+    echo "  setup/09-ssh-hardening.sh для полного hardening."
+    echo "✓ SSH hardening минимальный (WAN closed, password ещё работает с LAN)"
 fi
 
 # === Применяем root-пароль (положен rpcd-handler'ом в $STATE_DIR/root_pass) ===

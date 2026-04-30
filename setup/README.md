@@ -68,7 +68,6 @@ ssh "$ROUTER" 'sh -s' < setup/01-amneziawg.sh
 | Архитектура пакетов awg-openwrt | `${DISTRIB_ARCH}_${DISTRIB_TARGET}` из `/etc/openwrt_release` | `01-amneziawg.sh`, `post-upgrade.sh` |
 | Версия awg-openwrt | `v$DISTRIB_RELEASE` с fallback на последнюю стабильную (v25.12.2) | то же |
 | LAN-подсеть | `network_get_subnet lan` через `/lib/functions/network.sh`, fallback на `ipcalc.sh` | `02-podkop.sh`, `07-killswitch.sh` |
-| Архитектура nfqws-бинарника | `uname -m` | (zapret удалён, неактуально) |
 
 Поэтому переустановка на любой OpenWrt 25.12+ с поддерживаемой awg-openwrt архитектурой проходит без правок.
 
