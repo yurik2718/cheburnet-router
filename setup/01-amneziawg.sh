@@ -187,7 +187,7 @@ fi
 
 # Дадим 10 секунд на первый handshake
 echo "→ ждём handshake (до 10 сек)..."
-for i in 1 2 3 4 5; do
+for _ in 1 2 3 4 5; do
     sleep 2
     if awg show awg0 | grep -q 'latest handshake'; then
         hs=$(awg show awg0 | awk '/latest handshake:/{print $3,$4,$5,$6,$7,$8}')

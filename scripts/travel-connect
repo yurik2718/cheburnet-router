@@ -116,7 +116,7 @@ ifup wwan 2>/dev/null
 sleep 5
 
 # 5. Verify
-for i in 1 2 3 4 5; do
+for _ in 1 2 3 4 5; do
     if ifstatus wwan 2>/dev/null | grep -q '"up": true'; then
         IP=$(ifstatus wwan 2>/dev/null | awk -F'"' '/address/{getline; getline; print $4; exit}')
         echo "✓ подключились к '$SSID'"

@@ -21,6 +21,7 @@ probe_current() {
 
 # Probe a specific DoH endpoint directly (used to test before switching back)
 probe_upstream() {
+    # shellcheck disable=SC3043 # busybox-ash (target shell on OpenWrt) supports `local`
     local ip="$1"
     nslookup -timeout="$PROBE_TIMEOUT" cloudflare.com "$ip" 2>/dev/null \
         | grep -qE "Address.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"

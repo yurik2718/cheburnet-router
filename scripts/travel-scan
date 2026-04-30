@@ -9,7 +9,9 @@
 #   travel-scan both         # оба диапазона
 
 scan_radio() {
+    # shellcheck disable=SC3043 # busybox-ash (target shell on OpenWrt) supports `local`
     local PHY="$1"
+    # shellcheck disable=SC3043
     local IFACE=""
     # Найти interface на этом phy
     for I in /sys/class/ieee80211/$PHY/device/net/*; do
