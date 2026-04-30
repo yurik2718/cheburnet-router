@@ -284,6 +284,10 @@
     </div>
 
     <h3 style="color: var(--err);">Опасная зона</h3>
+    <p class="muted" style="margin-top: 0; margin-bottom: 8px;">
+      Factory reset стирает все настройки — включая сам веб-мастер <code>/cheburnet/</code>.
+      После сброса нужно будет заново выполнить SSH-команду <code>bootstrap.sh</code> из README.
+    </p>
     <div class="row">
       <button id="btn-factory-reset" class="ghost" style="border-color: var(--err); color: var(--err);">⚠ Сбросить до заводских</button>
     </div>
@@ -644,7 +648,7 @@ async function renderMgmt(st) {
                         : `<span class="dot dot-err"></span>handshake ${st.awg_handshake_age}s назад (протух, рестартуйте VPN)`]);
         rows.push(["podkop + sing-box", up(st.podkop_up)]);
     }
-    rows.push(["DNS (DoH)",        up(st.podkop_up)]);
+    rows.push(["DNS (DoH)",        up(st.dns_up)]);
     rows.push(["Adblock-lean",     up(st.adblock_up)]);
     rows.push(["Тир блок-листа",   st.blocklist_tier ? `hagezi:${escapeHtml(st.blocklist_tier)}` : "(неизвестно)"]);
     rows.push(["Wi-Fi SSID",       st.ssid || "(не задан)"]);
@@ -731,7 +735,9 @@ document.getElementById("btn-factory-reset").onclick = async () => {
         msg.className = "ok-msg";
         msg.classList.remove("hidden");
         msg.innerHTML = "Сброс запланирован. Роутер перезагрузится через несколько секунд.<br>" +
-                        "После перезагрузки откройте <code>http://192.168.1.1</code> заново.";
+                        "После перезагрузки веб-мастер <code>/cheburnet/</code> исчезнет — потребуется заново выполнить " +
+                        "SSH-команду <code>bootstrap.sh</code> из README, и только тогда откроется " +
+                        `<code>http://${location.host || "192.168.1.1"}/cheburnet/</code>.`;
         stopMgmtAutoRefresh();
     } catch (e) {
         const msg = document.getElementById("mgmt-msg");

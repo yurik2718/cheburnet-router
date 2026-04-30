@@ -32,9 +32,10 @@ else
     /usr/bin/dns-provider status
 fi
 
-# Живой тест
-if nslookup cloudflare.com 192.168.1.1 2>/dev/null | grep -q Address; then
-    echo "✓ резолвинг работает"
+# Живой тест — резолвим через локальный dnsmasq роутера, а не через хардкод 192.168.1.1
+LAN_IP=$(uci -q get network.lan.ipaddr || echo "127.0.0.1")
+if nslookup cloudflare.com "$LAN_IP" 2>/dev/null | grep -q Address; then
+    echo "✓ резолвинг работает (через $LAN_IP)"
 else
     echo "⚠ DNS не резолвит — проверьте logread | grep sing-box | grep dns"
 fi

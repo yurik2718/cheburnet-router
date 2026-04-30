@@ -98,6 +98,17 @@ case "$METHOD" in
         PODKOP_UP="false"
         /etc/init.d/sing-box status 2>&1 | grep -qi running && PODKOP_UP="true"
 
+        # DNS — отдельный probe: dnsmasq running + резолвится тестовый домен
+        # Лейбл «DNS (DoH)» в UI описывает работу sing-box-DoH через dnsmasq;
+        # podkop_up недостаточен — dnsmasq может упасть отдельно.
+        DNS_UP="false"
+        if /etc/init.d/dnsmasq status 2>&1 | grep -qi running; then
+            LAN_IP=$(uci -q get network.lan.ipaddr || echo "127.0.0.1")
+            if nslookup cloudflare.com "$LAN_IP" 2>/dev/null | grep -q Address; then
+                DNS_UP="true"
+            fi
+        fi
+
         # AWG handshake age
         AWG_HS_AGE="null"
         HS=$(awg show awg0 latest-handshakes 2>/dev/null | awk '{print $2}')
@@ -123,6 +134,7 @@ case "$METHOD" in
     "ssid": "$SSID",
     "adblock_up": $ADBLOCK_UP,
     "podkop_up": $PODKOP_UP,
+    "dns_up": $DNS_UP,
     "awg_handshake_age": $AWG_HS_AGE,
     "blocklist_tier": "$TIER"
 }
