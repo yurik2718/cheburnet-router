@@ -48,7 +48,8 @@ if [ "$1" = "list" ]; then
         "wifi_key": "str",
         "country": "str",
         "awg_conf": "str",
-        "root_pass": "str"
+        "root_pass": "str",
+        "token": "str"
     },
     "install_progress": {},
     "install_cancel": {},
@@ -126,10 +127,15 @@ case "$METHOD" in
             | sed -e 's/^raw_block_lists="\?//' -e 's/"\?$//' -e 's/hagezi://' | head -1)
         TIER=$(json_escape "${TIER_RAW:-pro}")
 
+        # Признак pre-install режима: токен на месте — значит ждём install_start
+        TOKEN_PRESENT="false"
+        [ -s /etc/cheburnet/install-token ] && TOKEN_PRESENT="true"
+
         cat <<EOF
 {
     "install_type": "$INSTALL_TYPE",
     "installing": $INSTALLING,
+    "install_token_required": $TOKEN_PRESENT,
     "mode": "$MODE_ESC",
     "ssid": "$SSID",
     "adblock_up": $ADBLOCK_UP,
@@ -146,6 +152,23 @@ EOF
         # Проверяем, не идёт ли уже установка
         if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
             echo '{"error": "installation already running", "pid": '"$(cat "$PID_FILE")"'}'
+            exit 0
+        fi
+
+        # === Проверка install-токена ===
+        # Защита от LAN-сквоттинга: даже unauth-вызов должен предъявить токен,
+        # выданный bootstrap.sh в /etc/cheburnet/install-token. После успешной
+        # установки run-install.sh удаляет файл — повторно установить нельзя
+        # без нового bootstrap-запуска.
+        TOKEN_FILE=/etc/cheburnet/install-token
+        if [ ! -s "$TOKEN_FILE" ]; then
+            echo '{"error": "install token not found — router is already installed or bootstrap.sh did not run. Re-run bootstrap.sh via SSH to get a new token."}'
+            exit 0
+        fi
+        EXPECTED_TOKEN=$(cat "$TOKEN_FILE")
+        GIVEN_TOKEN=$(jf '@.token')
+        if [ -z "$GIVEN_TOKEN" ] || [ "$GIVEN_TOKEN" != "$EXPECTED_TOKEN" ]; then
+            echo '{"error": "invalid install token — see SSH output of bootstrap.sh"}'
             exit 0
         fi
 

@@ -89,7 +89,13 @@ fi
 # === 5. Lock ACL и Финальный статус ===
 # После успешной установки запираем web-ACL: unauth-доступ остаётся только
 # к get_status и install_progress, мутирующие методы требуют login.
+# Также удаляем install-токен (если был оставлен bootstrap.sh — на случай
+# когда CLI-установка идёт после bootstrap.sh).
 ssh "$ROUTER" 'sh -s' <<'LOCK_ACL'
+if [ -f /etc/cheburnet/install-token ]; then
+    dd if=/dev/urandom of=/etc/cheburnet/install-token bs=1 count=32 conv=notrunc 2>/dev/null || true
+    rm -f /etc/cheburnet/install-token
+fi
 cat > /usr/share/rpcd/acl.d/cheburnet.json <<'ACL'
 {
     "unauthenticated": {

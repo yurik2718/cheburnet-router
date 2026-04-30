@@ -1,6 +1,6 @@
 {
     "unauthenticated": {
-        "description": "cheburnet-router web wizard — первичная настройка без аутентификации (LAN-only сценарий первой установки)",
+        "description": "cheburnet-router web wizard — первичная установка (LAN-only). Мутации защищены install-токеном, выданным bootstrap.sh.",
         "read": {
             "ubus": {
                 "cheburnet": ["get_status", "install_progress"]
@@ -8,14 +8,7 @@
         },
         "write": {
             "ubus": {
-                "cheburnet": [
-                    "install_start",
-                    "install_cancel",
-                    "mode_switch",
-                    "service_restart",
-                    "set_blocklist_tier",
-                    "factory_reset"
-                ]
+                "cheburnet": ["install_start", "install_cancel"]
             }
         }
     }

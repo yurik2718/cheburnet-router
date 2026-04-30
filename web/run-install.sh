@@ -136,6 +136,13 @@ if [ -s "$STATE_DIR/root_pass" ]; then
     rm -f "$STATE_DIR/root_pass"
 fi
 
+# === Удаляем install-токен (одноразовый, больше не нужен) ===
+if [ -f /etc/cheburnet/install-token ]; then
+    dd if=/dev/urandom of=/etc/cheburnet/install-token bs=1 count=32 conv=notrunc 2>/dev/null || true
+    rm -f /etc/cheburnet/install-token
+    echo "→ install-токен удалён"
+fi
+
 # === Запираем ACL: после установки unauth остаётся только read-only ===
 echo "[STEP] lock-acl" > "$STATE"
 echo

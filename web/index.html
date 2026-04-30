@@ -113,6 +113,16 @@
   <!-- ============================================================ -->
   <div id="scr-conf" class="panel hidden">
     <h2>Шаг 1 из 4 · Файл AmneziaWG-конфига</h2>
+
+    <div id="token-block" class="hidden">
+      <label>Install-токен (из вывода <code>bootstrap.sh</code>):</label>
+      <input type="text" id="inp-token" placeholder="32 hex-символа из SSH-консоли">
+      <p class="muted" style="margin-top: 4px;">
+        Если перешёл по ссылке вида <code>?token=...</code> из вывода <code>bootstrap.sh</code> — поле уже заполнено.
+        Иначе скопируй токен из терминала, где запускал bootstrap.
+      </p>
+    </div>
+
     <p>Загрузите <code>.conf</code>-файл от вашего AmneziaWG-сервера. В приложении Amnezia: Настройки → Сервер → Поделиться → Экспорт конфигурации.</p>
 
     <div class="edu" style="margin: 12px 0;">
@@ -417,8 +427,17 @@ const state = {
     rootPass: "",
     ssid: "",
     wifiKey: "",
-    country: "RU"
+    country: "RU",
+    token: ""
 };
+
+// Подхватить токен из URL ?token=... (выдаётся bootstrap.sh)
+(function readTokenFromUrl() {
+    try {
+        const m = window.location.search.match(/[?&]token=([0-9a-fA-F]+)/);
+        if (m) state.token = m[1];
+    } catch (_) {}
+})();
 
 // =====================================================================
 // Инициализация — проверить, настроен ли уже роутер
@@ -430,7 +449,16 @@ async function init() {
         if (st.installing) { goto("install"); pollProgress(); return; }
         // Если уже установлено — на management
         if (st.install_type !== "none") { goto("mgmt"); renderMgmt(st); startMgmtAutoRefresh(); return; }
-        // Иначе wizard
+
+        // Pre-install режим — показываем блок токена и подставляем значение из URL, если есть
+        if (st.install_token_required) {
+            const tokBlock = document.getElementById("token-block");
+            const tokInp   = document.getElementById("inp-token");
+            tokBlock.classList.remove("hidden");
+            if (state.token) tokInp.value = state.token;
+            tokInp.addEventListener("input", () => { state.token = tokInp.value.trim(); refreshConfValidation(); });
+        }
+
         goto("conf");
     } catch (e) {
         document.getElementById("scr-loading").innerHTML =
@@ -464,10 +492,16 @@ function validateConf(txt) {
 
 function refreshConfValidation() {
     const v = validateConf(taConf.value.trim());
-    confStatus.innerHTML = v.ok
-        ? `<span style="color:var(--ok)">${v.msg}</span>`
-        : `<span style="color:var(--warn)">${v.msg}</span>`;
-    document.getElementById("btn-conf-next").disabled = !v.ok;
+    const tokBlockVisible = !document.getElementById("token-block").classList.contains("hidden");
+    const tokenOk = !tokBlockVisible || /^[0-9a-fA-F]{32}$/.test(state.token);
+    let msg = v.msg;
+    if (v.ok && tokBlockVisible && !tokenOk) {
+        msg = "✓ Конфиг валиден. Введите install-токен (32 hex-символа).";
+    }
+    confStatus.innerHTML = (v.ok && tokenOk)
+        ? `<span style="color:var(--ok)">${msg}</span>`
+        : `<span style="color:var(--warn)">${msg}</span>`;
+    document.getElementById("btn-conf-next").disabled = !(v.ok && tokenOk);
 }
 
 taConf.addEventListener("input", refreshConfValidation);
@@ -576,7 +610,8 @@ async function startInstall() {
             wifi_key:  state.wifiKey,
             country:   state.country,
             awg_conf:  state.awgConf,
-            root_pass: state.rootPass
+            root_pass: state.rootPass,
+            token:     state.token
         });
         pollProgress();
     } catch (e) {
