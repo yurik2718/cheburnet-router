@@ -12,7 +12,7 @@
 
 Никаких VPN-кнопок, переключений и настроек на устройствах.
 
-[🚀 Что нужно сделать](#-что-нужно-сделать) · [💬 Помощь @industrialprofi](https://t.me/industrialprofi) · [🔬 Технические детали](#-технические-детали)
+[🚀 Что нужно сделать](#-что-нужно-сделать) · [<img src="https://cdn.simpleicons.org/telegram/26A5E4" height="14" alt="Telegram"/> Написать в Telegram — @industrialprofi](https://t.me/industrialprofi) · [🔬 Технические детали](#-технические-детали)
 
 </div>
 
