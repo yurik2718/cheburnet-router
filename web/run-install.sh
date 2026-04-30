@@ -94,6 +94,47 @@ else
     echo "  Если хотите использовать удалённый SSH — добавьте свой публичный ключ вручную."
 fi
 
+# === Применяем root-пароль (положен rpcd-handler'ом в $STATE_DIR/root_pass) ===
+if [ -s "$STATE_DIR/root_pass" ]; then
+    echo "[STEP] root-password" > "$STATE"
+    echo
+    echo "════════════════════════════════════════════"
+    echo " ШАГ: установка пароля root"
+    echo "════════════════════════════════════════════"
+    pass=$(cat "$STATE_DIR/root_pass")
+    if printf '%s\n%s\n' "$pass" "$pass" | passwd root >/dev/null 2>&1; then
+        echo "✓ пароль root установлен"
+    else
+        echo "⚠ passwd root не сработал — установите пароль вручную через SSH"
+    fi
+    unset pass
+    # Затираем файл (best-effort): сначала перезапись, потом unlink
+    dd if=/dev/urandom of="$STATE_DIR/root_pass" bs=1 count=64 conv=notrunc 2>/dev/null || true
+    rm -f "$STATE_DIR/root_pass"
+fi
+
+# === Запираем ACL: после установки unauth остаётся только read-only ===
+echo "[STEP] lock-acl" > "$STATE"
+echo
+echo "════════════════════════════════════════════"
+echo " ШАГ: запираем веб-ACL (read-only без логина)"
+echo "════════════════════════════════════════════"
+cat > /usr/share/rpcd/acl.d/cheburnet.json <<'ACL'
+{
+    "unauthenticated": {
+        "description": "cheburnet read-only status (post-install LAN-локально)",
+        "read": { "ubus": { "cheburnet": ["get_status", "install_progress"] } }
+    },
+    "cheburnet-admin": {
+        "description": "cheburnet admin (login as root required)",
+        "read":  { "ubus": { "cheburnet": ["get_status", "install_progress"] } },
+        "write": { "ubus": { "cheburnet": ["install_start", "install_cancel", "mode_switch", "service_restart", "set_blocklist_tier", "factory_reset"] } }
+    }
+}
+ACL
+/etc/init.d/rpcd reload >/dev/null 2>&1
+echo "✓ ACL заблокирован: чтение без логина, мутации требуют пароль root"
+
 echo
 echo "════════════════════════════════════════════"
 echo " ✓ Установка завершена успешно"

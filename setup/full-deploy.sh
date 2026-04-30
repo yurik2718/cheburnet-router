@@ -73,7 +73,41 @@ echo "=== RUN: setup/05-wifi.sh ==="
 ssh "$ROUTER" "WIFI_SSID='$WIFI_SSID' WIFI_KEY='$WIFI_KEY' WIFI_COUNTRY='${WIFI_COUNTRY:-RU}' sh -s" \
     < "$REPO_ROOT/setup/05-wifi.sh"
 
-# === 4. Финальный статус ===
+# === 4. Установка root-пароля (если передан) ===
+# ROOT_PASS приходит из setup.sh через env. Пропускаем через ssh stdin,
+# чтобы не светить пароль в командной строке/process-листинге.
+if [ -n "${ROOT_PASS:-}" ]; then
+    echo
+    echo "=== RUN: установка пароля root ==="
+    printf '%s\n' "$ROOT_PASS" | ssh "$ROUTER" 'sh -c "
+        IFS= read -r p
+        printf \"%s\n%s\n\" \"\$p\" \"\$p\" | passwd root >/dev/null 2>&1 && echo \"✓ root password set\" || echo \"⚠ passwd root failed\"
+    "'
+    unset ROOT_PASS
+fi
+
+# === 5. Lock ACL и Финальный статус ===
+# После успешной установки запираем web-ACL: unauth-доступ остаётся только
+# к get_status и install_progress, мутирующие методы требуют login.
+ssh "$ROUTER" 'sh -s' <<'LOCK_ACL'
+cat > /usr/share/rpcd/acl.d/cheburnet.json <<'ACL'
+{
+    "unauthenticated": {
+        "description": "cheburnet read-only status (post-install LAN-локально)",
+        "read": { "ubus": { "cheburnet": ["get_status", "install_progress"] } }
+    },
+    "cheburnet-admin": {
+        "description": "cheburnet admin (login as root required)",
+        "read":  { "ubus": { "cheburnet": ["get_status", "install_progress"] } },
+        "write": { "ubus": { "cheburnet": ["install_start", "install_cancel", "mode_switch", "service_restart", "set_blocklist_tier", "factory_reset"] } }
+    }
+}
+ACL
+/etc/init.d/rpcd reload >/dev/null 2>&1
+echo "✓ ACL locked: read-only without login"
+LOCK_ACL
+
+# === 6. Финальный статус ===
 echo
 echo "=== ФИНАЛЬНЫЙ СТАТУС ==="
 ssh "$ROUTER" 'echo "--- AWG ---"; awg show awg0 | grep -E "handshake|transfer"; \

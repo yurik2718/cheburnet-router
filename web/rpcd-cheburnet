@@ -4,7 +4,7 @@
 #
 # Методы:
 #   get_status         — состояние системы (режим, установлен ли VPN, handshake AWG, running-сервисы)
-#   install_start      — запустить установку (ssid, wifi_key, country, awg_conf)
+#   install_start      — запустить установку (ssid, wifi_key, country, awg_conf, root_pass)
 #   install_progress   — текущий шаг + последние 5000 байт логов + done-флаг
 #   install_cancel     — пометить установку как отменённую (реально не убивает процесс)
 #   mode_switch        — переключить HOME/TRAVEL
@@ -47,12 +47,15 @@ if [ "$1" = "list" ]; then
         "ssid": "str",
         "wifi_key": "str",
         "country": "str",
-        "awg_conf": "str"
+        "awg_conf": "str",
+        "root_pass": "str"
     },
     "install_progress": {},
     "install_cancel": {},
     "mode_switch": { "mode": "str" },
-    "service_restart": { "service": "str" }
+    "service_restart": { "service": "str" },
+    "set_blocklist_tier": { "tier": "str" },
+    "factory_reset": { "confirm": "str" }
 }
 EOF
     exit 0
@@ -107,6 +110,11 @@ case "$METHOD" in
         SSID=$(json_escape "$SSID_RAW")
         MODE_ESC=$(json_escape "$MODE")
 
+        # Текущий тир Hagezi из adblock-lean config
+        TIER_RAW=$(grep -E '^raw_block_lists=' /etc/adblock-lean/config 2>/dev/null \
+            | sed -e 's/^raw_block_lists="\?//' -e 's/"\?$//' -e 's/hagezi://' | head -1)
+        TIER=$(json_escape "${TIER_RAW:-pro}")
+
         cat <<EOF
 {
     "install_type": "$INSTALL_TYPE",
@@ -115,7 +123,8 @@ case "$METHOD" in
     "ssid": "$SSID",
     "adblock_up": $ADBLOCK_UP,
     "podkop_up": $PODKOP_UP,
-    "awg_handshake_age": $AWG_HS_AGE
+    "awg_handshake_age": $AWG_HS_AGE,
+    "blocklist_tier": "$TIER"
 }
 EOF
         ;;
@@ -132,12 +141,15 @@ EOF
         WIFI_KEY=$(jf '@.wifi_key')
         COUNTRY=$(jf '@.country')
         AWG_CONF=$(jf '@.awg_conf')
+        ROOT_PASS=$(jf '@.root_pass')
 
         # Валидация
         [ -z "$SSID" ]     && { echo '{"error": "ssid required"}'; exit 0; }
         [ -z "$WIFI_KEY" ] && { echo '{"error": "wifi_key required"}'; exit 0; }
         [ "${#WIFI_KEY}" -lt 8 ] && { echo '{"error": "wifi_key must be >= 8 chars"}'; exit 0; }
         [ -z "$COUNTRY" ]  && COUNTRY="RU"
+        [ -z "$ROOT_PASS" ] && { echo '{"error": "root_pass required"}'; exit 0; }
+        [ "${#ROOT_PASS}" -lt 8 ] && { echo '{"error": "root_pass must be >= 8 chars"}'; exit 0; }
 
         [ -z "$AWG_CONF" ] && { echo '{"error": "awg_conf required"}'; exit 0; }
         echo "$AWG_CONF" | grep -q '\[Interface\]' || { echo '{"error": "awg_conf does not contain [Interface] section"}'; exit 0; }
@@ -148,6 +160,12 @@ EOF
         mkdir -p /etc/amnezia/amneziawg
         printf '%s\n' "$AWG_CONF" > /etc/amnezia/amneziawg/awg0.conf
         chmod 600 /etc/amnezia/amneziawg/awg0.conf
+
+        # Передаём root-пароль run-install.sh через короткоживущий файл (chmod 600)
+        umask 077
+        printf '%s' "$ROOT_PASS" > "$STATE_DIR/root_pass"
+        chmod 600 "$STATE_DIR/root_pass"
+        unset ROOT_PASS
 
         # Сохраняем Wi-Fi-параметры для 05-wifi.sh
         cat > "$INSTALL_DIR/configs/wireless-actual.txt" <<EOF
@@ -268,6 +286,45 @@ EOF
                 echo '{"error": "unknown service"}'
                 ;;
         esac
+        ;;
+
+    # ------------------------------------------------------------------
+    set_blocklist_tier)
+        TIER=$(jf '@.tier')
+        # Допустимые тиры hagezi (см. https://github.com/hagezi/dns-blocklists)
+        case "$TIER" in
+            light|normal|pro|pro.plus|ultimate|tif|tif.medium|tif.mini|multi.pro|fake) ;;
+            *) echo '{"error": "tier must be one of: light, normal, pro, pro.plus, ultimate, tif, tif.medium, tif.mini, multi.pro, fake"}'; exit 0 ;;
+        esac
+
+        CONFIG=/etc/adblock-lean/config
+        if [ ! -f "$CONFIG" ]; then
+            echo '{"error": "adblock-lean config not found — установка не завершена"}'; exit 0
+        fi
+
+        # Заменяем строку raw_block_lists=... в конфиге
+        sed -i "s|^raw_block_lists=.*|raw_block_lists=\"hagezi:${TIER}\"|" "$CONFIG"
+
+        # Перегенерируем блок-лист (запускается в фоне — не блокирует RPC-ответ)
+        ( /etc/init.d/adblock-lean start >/dev/null 2>&1
+          /etc/init.d/dnsmasq restart >/dev/null 2>&1 ) &
+
+        TIER_ESC=$(json_escape "$TIER")
+        echo "{\"status\": \"tier set\", \"tier\": \"$TIER_ESC\"}"
+        ;;
+
+    # ------------------------------------------------------------------
+    factory_reset)
+        # Защита от случайного срабатывания: confirm должен быть строго "RESET"
+        CONFIRM=$(jf '@.confirm')
+        if [ "$CONFIRM" != "RESET" ]; then
+            echo '{"error": "confirm must be exactly \"RESET\""}'; exit 0
+        fi
+
+        # Запускаем firstboot отложенно (~3 сек), чтобы успеть отдать RPC-ответ
+        # и закрыть сессию. /etc/init.d/done вызывает sysupgrade -r.
+        ( sleep 3 && firstboot -y && reboot ) >/dev/null 2>&1 &
+        echo '{"status": "factory reset scheduled, router will reboot in ~5 seconds"}'
         ;;
 
     # ------------------------------------------------------------------

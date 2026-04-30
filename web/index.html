@@ -112,7 +112,7 @@
   <!-- Экран 1: AWG .conf -->
   <!-- ============================================================ -->
   <div id="scr-conf" class="panel hidden">
-    <h2>Шаг 1 из 3 · Файл AmneziaWG-конфига</h2>
+    <h2>Шаг 1 из 4 · Файл AmneziaWG-конфига</h2>
     <p>Загрузите <code>.conf</code>-файл от вашего AmneziaWG-сервера. В приложении Amnezia: Настройки → Сервер → Поделиться → Экспорт конфигурации.</p>
 
     <div class="edu" style="margin: 12px 0;">
@@ -137,10 +137,31 @@
   </div>
 
   <!-- ============================================================ -->
-  <!-- Экран 2: Wi-Fi -->
+  <!-- Экран 2: пароль администратора -->
+  <!-- ============================================================ -->
+  <div id="scr-rootpass" class="panel hidden">
+    <h2>Шаг 2 из 4 · Пароль администратора роутера</h2>
+    <p>Сейчас на свежем OpenWrt пароль root пуст — любой в LAN может зайти в LuCI/SSH без пароля. Придумайте пароль администратора: он понадобится для входа в это веб-управление и (опционально) восстановительного SSH-доступа.</p>
+
+    <label>Пароль root (8+ символов):</label>
+    <input type="password" id="inp-rootpass" placeholder="минимум 8 символов">
+
+    <label>Повторите:</label>
+    <input type="password" id="inp-rootpass2" placeholder="ещё раз">
+
+    <div id="rootpass-status" class="muted" style="margin-top: 10px;"></div>
+
+    <div class="row" style="justify-content: space-between;">
+      <button class="ghost" id="btn-rootpass-back">← Назад</button>
+      <button id="btn-rootpass-next" disabled>Дальше →</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Экран 3: Wi-Fi -->
   <!-- ============================================================ -->
   <div id="scr-wifi" class="panel hidden">
-    <h2 id="wifi-title">Шаг 2 из 3 · Wi-Fi</h2>
+    <h2 id="wifi-title">Шаг 3 из 4 · Wi-Fi</h2>
     <p>Все устройства, подключённые к этой Wi-Fi-сети, автоматически получат настройки — ничего не нужно настраивать на каждом телефоне/ноутбуке.</p>
 
     <label>Название сети (SSID):</label>
@@ -171,7 +192,7 @@
   <!-- Экран 3: подтверждение -->
   <!-- ============================================================ -->
   <div id="scr-confirm" class="panel hidden">
-    <h2 id="confirm-title">Шаг 3 из 3 · Подтверждение</h2>
+    <h2 id="confirm-title">Шаг 4 из 4 · Подтверждение</h2>
     <dl class="kv" id="confirm-summary"></dl>
 
     <div class="edu" style="margin-top: 16px;">
@@ -203,13 +224,24 @@
   <!-- ============================================================ -->
   <div id="scr-success" class="panel hidden">
     <div class="ok-msg"><strong>✓ Установка завершена!</strong></div>
-    <p>Подключитесь к Wi-Fi с вашим новым SSID и проверьте работу:</p>
-    <ul>
-      <li>Откройте <a href="https://speedtest.yandex.ru" target="_blank" style="color:var(--accent)">speedtest.yandex.ru</a> — российский сервис, должен работать напрямую</li>
-      <li>Откройте <a href="https://speedtest.net" target="_blank" style="color:var(--accent)">speedtest.net</a> — заблокирован в РФ, откроется только если обход работает</li>
-    </ul>
+
+    <h3>Что проверить</h3>
+    <ol>
+      <li>Подключитесь к Wi-Fi с вашим новым SSID</li>
+      <li>Откройте <a href="https://speedtest.yandex.ru" target="_blank" style="color:var(--accent)">speedtest.yandex.ru</a> — российский сервис идёт напрямую с полной скоростью</li>
+      <li>Откройте <a href="https://speedtest.net" target="_blank" style="color:var(--accent)">speedtest.net</a> — иностранный сервис идёт через VPN-туннель</li>
+      <li>Сравните <code>traceroute</code> для обоих — увидите два разных маршрута, это и есть split-routing в работе</li>
+    </ol>
+
+    <div class="edu" style="margin-top: 16px;">
+      <strong>🔐 Управление защищено паролем root.</strong>
+      Веб-страница <code>/cheburnet/</code> теперь показывает статус без пароля,
+      но любое действие (перезапуск VPN, переключение HOME/TRAVEL, смена блок-листа) попросит
+      пароль администратора, который вы задали в шаге 2.
+    </div>
+
     <div class="row">
-      <button onclick="goto('mgmt')">К управлению →</button>
+      <button onclick="goto('mgmt'); renderMgmt(); startMgmtAutoRefresh();">К управлению →</button>
     </div>
   </div>
 
@@ -235,10 +267,31 @@
       <button id="btn-svc-adblock" class="ghost">Adblock</button>
     </div>
 
+    <h3>Блок-лист рекламы (Hagezi)</h3>
+    <p class="muted" style="margin-top: 0; margin-bottom: 8px;">
+      Если перестали открываться нужные сайты или мессенджеры — попробуйте более мягкий тир.
+    </p>
+    <div class="row" style="gap: 8px; align-items: flex-end;">
+      <select id="inp-tier" style="flex: 1 1 auto; max-width: 280px;">
+        <option value="light">light — минимальный (только реклама)</option>
+        <option value="normal">normal — реклама + трекеры</option>
+        <option value="pro" selected>pro — рекомендованный (~200k)</option>
+        <option value="pro.plus">pro.plus — pro + agressive privacy</option>
+        <option value="ultimate">ultimate — максимум (может ломать сайты)</option>
+        <option value="multi.pro">multi.pro — pro для нескольких языков</option>
+      </select>
+      <button id="btn-tier-apply" class="ghost">Применить</button>
+    </div>
+
+    <h3 style="color: var(--err);">Опасная зона</h3>
+    <div class="row">
+      <button id="btn-factory-reset" class="ghost" style="border-color: var(--err); color: var(--err);">⚠ Сбросить до заводских</button>
+    </div>
+
     <div id="mgmt-msg" class="hidden"></div>
 
     <p class="muted" style="margin-top: 24px;">
-      Расширенная диагностика через SSH: <code>ssh root@ROUTER_IP travel-check</code>
+      Статус обновляется каждые 15 секунд. Расширенная диагностика через SSH: <code>ssh root@ROUTER_IP travel-check</code>
     </p>
   </div>
 
@@ -249,15 +302,20 @@
 // RPC client: ubus JSON-RPC через /ubus
 // =====================================================================
 const UBUS_URL = "/ubus";
-const SESSION  = "00000000000000000000000000000000"; // unauth session (ACL даёт нужные права)
+const ANON_SESSION = "00000000000000000000000000000000";
 
+// На первой установке ACL даёт unauth-доступ к мутирующим методам.
+// После установки run-install.sh переписывает ACL — мутации требуют login.
+// Сессия живёт в памяти страницы; при перезагрузке логин запрашивается заново.
+let currentSession = ANON_SESSION;
 let rpcId = 1;
-async function rpc(object, method, args) {
+
+async function rpcRaw(session, object, method, args) {
     const body = {
         jsonrpc: "2.0",
         id: rpcId++,
         method: "call",
-        params: [SESSION, object, method, args || {}]
+        params: [session, object, method, args || {}]
     };
     const res = await fetch(UBUS_URL, {
         method: "POST",
@@ -267,16 +325,80 @@ async function rpc(object, method, args) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.error) throw new Error(`ubus error: ${JSON.stringify(json.error)}`);
-    // ubus возвращает [code, data]; code=0 → ok
-    const [code, data] = json.result;
-    if (code !== 0) throw new Error(`ubus code ${code}`);
-    return data || {};
+    return json.result; // [code, data]
+}
+
+async function rpc(object, method, args, opts) {
+    opts = opts || {};
+    let result = await rpcRaw(currentSession, object, method, args);
+    if (result[0] === 0) return result[1] || {};
+
+    // ACL отказ (UBUS_STATUS_NOT_FOUND=4 / PERMISSION_DENIED=6) — просим логин и повторяем
+    if ((result[0] === 4 || result[0] === 6) && !opts.noLogin) {
+        let lastErr = null;
+        for (let i = 0; i < 3; i++) {
+            const password = await loginPrompt(lastErr);
+            if (!password) throw new Error("login cancelled");
+            try {
+                currentSession = await doLogin(password);
+                lastErr = null;
+                break;
+            } catch (e) {
+                lastErr = "Неверный пароль root";
+                if (i === 2) throw new Error(lastErr);
+            }
+        }
+        result = await rpcRaw(currentSession, object, method, args);
+        if (result[0] === 0) return result[1] || {};
+    }
+    throw new Error(`ubus code ${result[0]}`);
+}
+
+async function doLogin(password) {
+    const [code, data] = await rpcRaw(ANON_SESSION, "session", "login", {
+        username: "root",
+        password: password,
+        timeout: 3600
+    });
+    if (code !== 0 || !data || !data.ubus_rpc_session) {
+        throw new Error("login failed");
+    }
+    return data.ubus_rpc_session;
+}
+
+function loginPrompt(errorMsg) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px";
+        overlay.innerHTML = `
+            <div class="panel" style="max-width:420px;margin:0;width:100%">
+              <h2 style="margin-top:0">🔐 Войти как root</h2>
+              <p class="muted">Управление защищено паролем администратора (тот, что задавали при установке).</p>
+              <label>Пароль root:</label>
+              <input type="password" id="login-pass" style="margin-top:6px">
+              ${errorMsg ? `<div class="err-msg" style="margin-top:10px">${errorMsg}</div>` : ''}
+              <div class="row" style="justify-content:space-between;margin-top:16px">
+                <button class="ghost" id="login-cancel">Отмена</button>
+                <button id="login-ok">Войти</button>
+              </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const passInp = overlay.querySelector("#login-pass");
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.querySelector("#login-cancel").onclick = () => close(null);
+        overlay.querySelector("#login-ok").onclick = () => close(passInp.value);
+        passInp.onkeydown = (e) => {
+            if (e.key === "Enter") close(passInp.value);
+            else if (e.key === "Escape") close(null);
+        };
+        setTimeout(() => passInp.focus(), 50);
+    });
 }
 
 // =====================================================================
 // Навигация между экранами
 // =====================================================================
-const SCREENS = ["loading", "conf", "wifi", "confirm", "install", "success", "mgmt"];
+const SCREENS = ["loading", "conf", "rootpass", "wifi", "confirm", "install", "success", "mgmt"];
 function goto(name) {
     SCREENS.forEach(s => document.getElementById("scr-" + s).classList.toggle("hidden", s !== name));
     document.getElementById("edu").classList.toggle("hidden", name === "mgmt");
@@ -288,6 +410,7 @@ function goto(name) {
 // =====================================================================
 const state = {
     awgConf: "",
+    rootPass: "",
     ssid: "",
     wifiKey: "",
     country: "RU"
@@ -302,7 +425,7 @@ async function init() {
         // Если установка в процессе — сразу на экран установки
         if (st.installing) { goto("install"); pollProgress(); return; }
         // Если уже установлено — на management
-        if (st.install_type !== "none") { goto("mgmt"); renderMgmt(st); return; }
+        if (st.install_type !== "none") { goto("mgmt"); renderMgmt(st); startMgmtAutoRefresh(); return; }
         // Иначе wizard
         goto("conf");
     } catch (e) {
@@ -353,11 +476,48 @@ inpConf.addEventListener("change", e => {
 });
 document.getElementById("btn-conf-next").onclick = () => {
     state.awgConf = taConf.value.trim();
+    goto("rootpass");
+};
+
+// =====================================================================
+// Экран 2 — пароль администратора (root)
+// =====================================================================
+const inpRoot1 = document.getElementById("inp-rootpass");
+const inpRoot2 = document.getElementById("inp-rootpass2");
+const rootStatus = document.getElementById("rootpass-status");
+
+function refreshRootValidation() {
+    const p1 = inpRoot1.value;
+    const p2 = inpRoot2.value;
+    let ok = false, msg = "";
+    if (p1.length === 0) {
+        msg = "Введите пароль.";
+    } else if (p1.length < 8) {
+        msg = "Минимум 8 символов.";
+    } else if (p2.length === 0) {
+        msg = "Повторите пароль.";
+    } else if (p1 !== p2) {
+        msg = "Пароли не совпадают.";
+    } else {
+        ok = true;
+        msg = "✓ Пароль принят.";
+    }
+    rootStatus.innerHTML = ok
+        ? `<span style="color:var(--ok)">${msg}</span>`
+        : `<span style="color:var(--warn)">${msg}</span>`;
+    document.getElementById("btn-rootpass-next").disabled = !ok;
+}
+inpRoot1.addEventListener("input", refreshRootValidation);
+inpRoot2.addEventListener("input", refreshRootValidation);
+
+document.getElementById("btn-rootpass-back").onclick = () => goto("conf");
+document.getElementById("btn-rootpass-next").onclick = () => {
+    state.rootPass = inpRoot1.value;
     goto("wifi");
 };
 
 // =====================================================================
-// Экран 2 — Wi-Fi
+// Экран 3 — Wi-Fi
 // =====================================================================
 const inpSsid = document.getElementById("inp-ssid");
 const inpPass = document.getElementById("inp-pass");
@@ -370,7 +530,7 @@ function refreshWifiValidation() {
 inpSsid.addEventListener("input", refreshWifiValidation);
 inpPass.addEventListener("input", refreshWifiValidation);
 
-document.getElementById("btn-wifi-back").onclick = () => goto("conf");
+document.getElementById("btn-wifi-back").onclick = () => goto("rootpass");
 document.getElementById("btn-wifi-next").onclick = () => {
     state.ssid    = inpSsid.value.trim();
     state.wifiKey = inpPass.value;
@@ -380,17 +540,18 @@ document.getElementById("btn-wifi-next").onclick = () => {
 };
 
 // =====================================================================
-// Экран 3 — подтверждение
+// Экран 4 — подтверждение
 // =====================================================================
 function renderConfirm() {
-    document.getElementById("confirm-title").textContent = "Шаг 3 из 3 · Подтверждение";
+    document.getElementById("confirm-title").textContent = "Шаг 4 из 4 · Подтверждение";
     const s = document.getElementById("confirm-summary");
     const rows = [
-        ["Стек",         "AmneziaWG + podkop + split-routing"],
-        ["Wi-Fi",        `${state.ssid} · WPA2/WPA3-mixed · страна ${state.country}`],
-        ["AWG-конфиг",   `${state.awgConf.split("\n").length} строк, подготовлен`],
-        ["Adblock",      "Hagezi Pro (~200 000 доменов)"],
-        ["DNS",          "Quad9 DoH"],
+        ["Стек",          "AmneziaWG + podkop + split-routing"],
+        ["Пароль root",   `задан (${state.rootPass.length} символов)`],
+        ["Wi-Fi",         `${state.ssid} · WPA2/WPA3-mixed · страна ${state.country}`],
+        ["AWG-конфиг",    `${state.awgConf.split("\n").length} строк, подготовлен`],
+        ["Adblock",       "Hagezi Pro (~200 000 доменов)"],
+        ["DNS",           "Quad9 DoH"],
     ];
     s.innerHTML = rows.map(([k, v]) => `<dt>${k}:</dt><dd>${escapeHtml(v)}</dd>`).join("");
 }
@@ -407,10 +568,11 @@ async function startInstall() {
     document.getElementById("install-log").textContent = "";
     try {
         await rpc("cheburnet", "install_start", {
-            ssid:     state.ssid,
-            wifi_key: state.wifiKey,
-            country:  state.country,
-            awg_conf: state.awgConf
+            ssid:      state.ssid,
+            wifi_key:  state.wifiKey,
+            country:   state.country,
+            awg_conf:  state.awgConf,
+            root_pass: state.rootPass
         });
         pollProgress();
     } catch (e) {
@@ -463,8 +625,12 @@ async function pollProgress() {
 // =====================================================================
 // Management screen
 // =====================================================================
+let mgmtRefreshTimer = null;
+let lastMgmtUpdate = 0;
+
 async function renderMgmt(st) {
     if (!st) st = await rpc("cheburnet", "get_status");
+    lastMgmtUpdate = Date.now();
 
     const up  = (b) => b ? `<span class="dot dot-ok"></span>работает` : `<span class="dot dot-err"></span>не работает`;
     const muted = (txt) => `<span class="dot dot-muted"></span>${txt}`;
@@ -480,15 +646,40 @@ async function renderMgmt(st) {
     }
     rows.push(["DNS (DoH)",        up(st.podkop_up)]);
     rows.push(["Adblock-lean",     up(st.adblock_up)]);
+    rows.push(["Тир блок-листа",   st.blocklist_tier ? `hagezi:${escapeHtml(st.blocklist_tier)}` : "(неизвестно)"]);
     rows.push(["Wi-Fi SSID",       st.ssid || "(не задан)"]);
 
     document.getElementById("mgmt-status").innerHTML =
         rows.map(([k, v]) => `<dt>${k}:</dt><dd>${v}</dd>`).join("");
 
+    // Подсветить выбранный тир в dropdown
+    if (st.blocklist_tier) {
+        const tierSel = document.getElementById("inp-tier");
+        if (tierSel.querySelector(`option[value="${st.blocklist_tier}"]`)) {
+            tierSel.value = st.blocklist_tier;
+        }
+    }
+
     // Переключение режима показываем только когда установлен VPN
     const showMode = st.install_type === "vpn";
     document.getElementById("mgmt-mode-header").classList.toggle("hidden", !showMode);
     document.getElementById("mgmt-mode").classList.toggle("hidden", !showMode);
+}
+
+// Авто-обновление каждые 15 сек, пауза при скрытой странице
+function startMgmtAutoRefresh() {
+    stopMgmtAutoRefresh();
+    mgmtRefreshTimer = setInterval(() => {
+        if (document.hidden) return;
+        if (document.getElementById("scr-mgmt").classList.contains("hidden")) {
+            stopMgmtAutoRefresh();
+            return;
+        }
+        renderMgmt().catch(() => {/* сеть моргнула — попробуем в следующий тик */});
+    }, 15000);
+}
+function stopMgmtAutoRefresh() {
+    if (mgmtRefreshTimer) { clearInterval(mgmtRefreshTimer); mgmtRefreshTimer = null; }
 }
 
 async function mgmtCall(object, method, args, label) {
@@ -512,6 +703,53 @@ document.getElementById("btn-travel").onclick  = () => mgmtCall("cheburnet", "mo
 document.getElementById("btn-svc-vpn").onclick     = () => mgmtCall("cheburnet", "service_restart", { service: "vpn" },     "Перезапуск VPN");
 document.getElementById("btn-svc-dns").onclick     = () => mgmtCall("cheburnet", "service_restart", { service: "dns" },     "Перезапуск DNS");
 document.getElementById("btn-svc-adblock").onclick = () => mgmtCall("cheburnet", "service_restart", { service: "adblock" }, "Перезагрузка adblock");
+
+// Hagezi tier
+document.getElementById("btn-tier-apply").onclick = () => {
+    const tier = document.getElementById("inp-tier").value;
+    mgmtCall("cheburnet", "set_blocklist_tier", { tier }, `Смена тира на hagezi:${tier}`);
+};
+
+// Factory reset — двухэтапное подтверждение
+document.getElementById("btn-factory-reset").onclick = async () => {
+    const word = prompt(
+        "Сброс роутера к заводским настройкам.\n\n" +
+        "Все настройки (VPN, Wi-Fi, пароли) будут стёрты, роутер перезагрузится.\n" +
+        "Вы потеряете доступ к этой странице.\n\n" +
+        "Введите RESET (заглавными), чтобы подтвердить:"
+    );
+    if (word !== "RESET") {
+        const msg = document.getElementById("mgmt-msg");
+        msg.className = "muted";
+        msg.classList.remove("hidden");
+        msg.textContent = "Сброс отменён.";
+        return;
+    }
+    try {
+        await rpc("cheburnet", "factory_reset", { confirm: "RESET" });
+        const msg = document.getElementById("mgmt-msg");
+        msg.className = "ok-msg";
+        msg.classList.remove("hidden");
+        msg.innerHTML = "Сброс запланирован. Роутер перезагрузится через несколько секунд.<br>" +
+                        "После перезагрузки откройте <code>http://192.168.1.1</code> заново.";
+        stopMgmtAutoRefresh();
+    } catch (e) {
+        const msg = document.getElementById("mgmt-msg");
+        msg.className = "err-msg";
+        msg.classList.remove("hidden");
+        msg.textContent = `Ошибка сброса: ${e.message}`;
+    }
+};
+
+// Останавливаем auto-refresh при скрытии вкладки
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+        // Возврат на вкладку — обновим сразу
+        if (!document.getElementById("scr-mgmt").classList.contains("hidden")) {
+            renderMgmt().catch(() => {});
+        }
+    }
+});
 
 // =====================================================================
 // Утилиты

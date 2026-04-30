@@ -12,7 +12,9 @@
                     "install_start",
                     "install_cancel",
                     "mode_switch",
-                    "service_restart"
+                    "service_restart",
+                    "set_blocklist_tier",
+                    "factory_reset"
                 ]
             }
         }
