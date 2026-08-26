@@ -2,7 +2,8 @@
 //   ucode -R engine/steps/vpn/tests/test_vpn.uc
 
 import { test, eq, ok, deep_eq, summary } from "../../../lib/assert.uc";
-import { parse_awg_conf, split_endpoint, build_vpn_plan, owned_sections } from "../vpn.uc";
+import { parse_awg_conf, split_endpoint, build_vpn_plan, build_arm_ops, owned_sections,
+         route_sections } from "../vpn.uc";
 
 // Типовой .conf с обфускацией и PSK (значения-заглушки, не настоящие ключи).
 const CONF = "[Interface]\n" +
@@ -65,24 +66,71 @@ test("build_vpn_plan: интерфейс awg0, обфускация только
 	ok(index(join("\n", plan.setup), "awg_s2") < 0, "S2 отсутствует → не пишем");
 });
 
-test("build_vpn_plan: route_allowed_ips='1' — туннель=дефолт (v2, netifd держит маршрут)", () => {
+// --- маршрут туннеля: half-routes, а не один default (см. ИНВАРИАНТ у HALF_ROUTES в vpn.uc) ---
+// Это регресс-тест инцидента: proto-handler ставил ОДИН `default dev awg0`, замещавший WAN-дефолт,
+// и первый же подъём WAN возвращал свой default обратно — туннель жив, панель зелёная, а весь
+// не-direct трафик LAN резал kill-switch. Лечилось только перезагрузкой.
+test("build_vpn_plan: маршрут держат half-routes 0.0.0.0/1 + 128.0.0.0/1 (WAN-дефолт не трогаем)", () => {
 	let plan = build_vpn_plan(parse_awg_conf(CONF), {});
-	ok(has(plan.setup, "set network.awg0_peer.route_allowed_ips='1'"),
-		"netifd ставит default через awg0 + пинит endpoint; direct вытягивает policy-routing (fail-safe в туннель)");
+	ok(has(plan.setup, "set network.awg0_route4lo=route"));
+	ok(has(plan.setup, "set network.awg0_route4lo.target='0.0.0.0/1'"));
+	ok(has(plan.setup, "set network.awg0_route4hi.target='128.0.0.0/1'"));
+	ok(has(plan.setup, "set network.awg0_route4lo.interface='awg0'"), "маршрут привязан к интерфейсу туннеля");
+	ok(index(join("\n", plan.setup), "target='0.0.0.0/0'") < 0,
+		"ни одного полного default: он ЗАМЕСТИЛ бы WAN-дефолт, и подъём WAN отобрал бы маршрут обратно");
+});
+
+test("build_vpn_plan: v6 наравне с v4 — ::/1 + 8000::/1 (поведение allowed_ips '::/0' сохранено)", () => {
+	let plan = build_vpn_plan(parse_awg_conf(CONF), {});
+	ok(has(plan.setup, "set network.awg0_route6lo=route6"));
+	ok(has(plan.setup, "set network.awg0_route6lo.target='::/1'"));
+	ok(has(plan.setup, "set network.awg0_route6hi.target='8000::/1'"));
+});
+
+test("build_vpn_plan: route_allowed_ips ВСЕГДА '0' — маршрут держим мы, не proto-handler", () => {
+	ok(has(build_vpn_plan(parse_awg_conf(CONF), {}).setup,
+		"set network.awg0_peer.route_allowed_ips='0'"), "вооружённый план");
+	ok(has(build_vpn_plan(parse_awg_conf(CONF), { arm: false }).setup,
+		"set network.awg0_peer.route_allowed_ips='0'"), "невооружённый план");
+	ok(index(join("\n", build_vpn_plan(parse_awg_conf(CONF), {}).setup),
+		"route_allowed_ips='1'") < 0, "старое значение не просочилось ни при каких opts");
 });
 
 // --- arm:false (первая установка, до health-check — см. [[reliability]]) ---
-test("build_vpn_plan: arm=false → route_allowed_ips='0', остальной план не меняется", () => {
+test("build_vpn_plan: arm=false → half-routes НЕ создаются, остальной план не меняется", () => {
 	let plan = build_vpn_plan(parse_awg_conf(CONF), { arm: false });
-	ok(has(plan.setup, "set network.awg0_peer.route_allowed_ips='0'"),
+	ok(index(join("\n", plan.setup), "_route4lo=route") < 0,
 		"дом не переключается на непроверенный туннель раньше health-check");
+	ok(index(join("\n", plan.setup), "_route6lo=route6") < 0, "и v6 тоже");
 	ok(has(plan.setup, "set network.awg0_peer.public_key='cHVibGljcHVibGljcHVibGljcHVibGljcHVibGljMDA='"),
 		"остальной план (ключи/endpoint) от arm не зависит");
 });
 
-test("build_vpn_plan: arm не задан → как раньше '1' (обратная совместимость replace_vpn/reapply)", () => {
-	let plan = build_vpn_plan(parse_awg_conf(CONF), {});
-	ok(has(plan.setup, "set network.awg0_peer.route_allowed_ips='1'"));
+test("build_vpn_plan: arm не задан → вооружено (обратная совместимость replace_vpn/reapply)", () => {
+	ok(has(build_vpn_plan(parse_awg_conf(CONF), {}).setup, "set network.awg0_route4lo=route"));
+});
+
+// Пере-применение с --no-arm обязано СНЯТЬ прежние half-routes — иначе «не вооружён» остался бы
+// вооружённым, и дом переключился бы на непроверенный туннель молча.
+test("build_vpn_plan: teardown сносит route-секции при ЛЮБОМ arm", () => {
+	for (let opts in [ {}, { arm: false } ])
+		ok(has(build_vpn_plan(parse_awg_conf(CONF), opts).teardown, "delete network.awg0_route4lo"));
+});
+
+// --- build_arm_ops: путь apply.uc --arm (довооружение и миграция со старой схемы) ---
+test("build_arm_ops: идемпотентен (delete-before-set) и запрещает proto-handler'у свой маршрут", () => {
+	let arm = build_arm_ops(null);
+	deep_eq(arm.teardown, [ "delete network.awg0_route4lo", "delete network.awg0_route4hi",
+		"delete network.awg0_route6lo", "delete network.awg0_route6hi" ]);
+	eq(arm.setup[0], "set network.awg0_peer.route_allowed_ips='0'",
+		"миграция со старой схемы: '1' обязан быть перебит ДО reload");
+	ok(has(arm.setup, "set network.awg0_route4hi.target='128.0.0.0/1'"));
+});
+
+test("build_arm_ops: уважает кастомный interface (имена не хардкод)", () => {
+	let arm = build_arm_ops({ interface: "awg1" });
+	ok(has(arm.setup, "set network.awg1_route4lo.interface='awg1'"));
+	ok(has(arm.teardown, "delete network.awg1_route4lo"));
 });
 
 test("build_vpn_plan: peer — endpoint split, PSK, forced allowed_ips, keepalive", () => {
@@ -98,7 +146,9 @@ test("build_vpn_plan: peer — endpoint split, PSK, forced allowed_ips, keepaliv
 
 test("build_vpn_plan: teardown удаляет интерфейс и peer (delete-before-add)", () => {
 	let plan = build_vpn_plan(parse_awg_conf(CONF), {});
-	deep_eq(plan.teardown, [ "delete network.awg0", "delete network.awg0_peer" ]);
+	deep_eq(plan.teardown, [ "delete network.awg0", "delete network.awg0_peer",
+		"delete network.awg0_route4lo", "delete network.awg0_route4hi",
+		"delete network.awg0_route6lo", "delete network.awg0_route6hi" ]);
 });
 
 // --- dual-stack Address ---
@@ -137,12 +187,23 @@ test("build_vpn_plan: кастомный interface → секции и тип pe
 	let plan = build_vpn_plan(parse_awg_conf(CONF), { interface: "awg1" });
 	ok(has(plan.setup, "set network.awg1=interface"));
 	ok(has(plan.setup, "set network.awg1_peer=amneziawg_awg1"));
-	ok(has(plan.setup, "set network.awg1_peer.route_allowed_ips='1'"));
+	ok(has(plan.setup, "set network.awg1_route4lo.interface='awg1'"));
 });
 
 test("owned_sections: имена секций шага (источник для reset), уважает opts", () => {
-	deep_eq(owned_sections(null), [ "awg0", "awg0_peer" ]);
-	deep_eq(owned_sections({ interface: "awg1" }), [ "awg1", "awg1_peer" ]);
+	deep_eq(owned_sections(null), [ "awg0", "awg0_peer",
+		"awg0_route4lo", "awg0_route4hi", "awg0_route6lo", "awg0_route6hi" ]);
+	deep_eq(owned_sections({ interface: "awg1" }), [ "awg1", "awg1_peer",
+		"awg1_route4lo", "awg1_route4hi", "awg1_route6lo", "awg1_route6hi" ]);
+});
+
+// route-секции ОБЯЗАНЫ быть внутри owned_sections: reset.uc сносит ровно её список, и забытая
+// половина оставила бы в uci маршрут в несуществующий туннель.
+test("owned_sections включает все route_sections (reset не оставит осиротевший маршрут)", () => {
+	let owned = owned_sections(null), routes = route_sections(null);
+	eq(length(routes), 4);
+	for (let i = 0; i < length(routes); i++)
+		ok(index(owned, routes[i]) >= 0, routes[i] + " — в списке владения");
 });
 
 // КОНТРАКТ для vpn/apply --teardown (смена протокола awg→reality): элемент [0] — это ИНТЕРФЕЙС,

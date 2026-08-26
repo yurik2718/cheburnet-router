@@ -4,17 +4,9 @@
 //   ucode -R apply.uc [--dry-run]
 
 import { stdin, popen } from "fs";
-import { uci_batch } from "../../lib/proc.uc";
+import { sh, uci_batch } from "../../lib/proc.uc";
 import { build_doh_plan } from "./doh.uc";
 import { resolvers_for } from "./providers.uc";
-
-function sh(cmd) {
-	let p = popen(cmd, "r");
-	if (!p) return "";
-	let out = p.read("all") ?? "";
-	p.close();
-	return out;
-}
 
 let dry = (length(ARGV) > 0 && ARGV[0] == "--dry-run");
 
@@ -37,7 +29,11 @@ for (let i = 0; i < length(lines); i++) {
 let srv_raw = trim(sh("uci -q get dhcp.@dnsmasq[0].server 2>/dev/null"));
 let servers = length(srv_raw) > 0 ? split(srv_raw, /[ \t]+/) : [];
 
-let plan = build_doh_plan({ hdp_sections: hdp_sections, servers: servers }, { resolvers: resolvers });
+// strict-order dnsmasq: держим сами (порядок upstream'ов значим — см. doh.uc).
+let strictorder = trim(sh("uci -q get dhcp.@dnsmasq[0].strictorder 2>/dev/null"));
+
+let plan = build_doh_plan({ hdp_sections: hdp_sections, servers: servers,
+	options: { strictorder: strictorder } }, { resolvers: resolvers });
 if (!plan.ok) {
 	for (let i = 0; i < length(plan.errors); i++) warn("doh: " + plan.errors[i] + "\n");
 	exit(1);

@@ -1,15 +1,12 @@
-// reapply.uc — вернуть runtime-часть data-plane из сохранённой конфигурации (импурно, router-side).
-//
-//   ucode -R reapply.uc            # переприменить firewall-шаг из /etc/cheburnet/install.json
-//
-// Зовётся из двух мест: hotplug-хук на подъём WAN и откат поверх рабочей системы (run.uc) —
-// одна реализация на оба случая, чтобы «после ребута» не расходилось с «после отката».
+// reapply.uc — вернуть runtime-часть data-plane из /etc/cheburnet/install.json (импурно).
+//   ucode -R reapply.uc      # коды: 0 применено/нечего применять, 1 шаг упал, 2 WAN не найден
+// ЕДИНСТВЕННАЯ реализация «переприменить» — её зовут hotplug-хук, откат run.uc, set_mode (rpcd),
+// resume (pause.uc) и сторож: «после ребута» не должно расходиться с «после смены режима».
 
 import { readfile } from "fs";
 import { sh, run_stdin } from "../lib/proc.uc";
-import { tunnel_info, protocol_ids, default_protocol } from "./install.uc";
-import { parse_wan_route } from "../preflight/parse.uc";
-import { pick_wan_fallback } from "../lib/route.uc";
+import { tunnel_info, default_protocol } from "./install.uc";
+import { detect_wan } from "../lib/wan.uc";
 
 const ETC = getenv("ETC_CHEBURNET") ?? "/etc/cheburnet";
 // Путь к движку выводим от себя (как run.uc), а не хардкодим: тот же файл работает и из репозитория,
@@ -29,21 +26,25 @@ let saved = (raw && substr(trim(raw), 0, 1) == "{") ? json(raw) : null;
 if (!saved || type(saved.routing_opts) != "object")
 	exit(0);
 
+// Аварийный режим — осознанный выбор человека, и он обязан пережить перезагрузку: иначе роутер
+// вернётся с защитой и снова без интернета, а человек уже не поймёт, почему «само сломалось».
+// Сторожа при этом НЕ снимаем (он тоже видит paused и не вмешивается) — вернуть защиту можно
+// одной кнопкой в панели.
+if (saved.paused === true) {
+	sh(sprintf("ucode -R %s/watchdog/cron.uc >/dev/null 2>&1", ENGINE));
+	exit(0);
+}
+
 let ro = saved.routing_opts;
 
-// Свежий WAN: netifd — первичный источник, дефолт-маршрут мимо туннелей — фолбэк (как в run.uc).
-let wr = parse_wan_route(sh("ubus call network.interface.wan status 2>/dev/null"));
+// ШРАМ: первый ifup после загрузки (~20с) опережает готовность WAN. Применить с сохранённым wan_if
+// тогда хуже, чем ничего (правило есть, маршрут в пустоту) — без свежего WAN не применяем вовсе:
+// следующий ifup доведёт, а синхронный вызывающий (set_mode) по коду 2 скажет честно.
+let wr = detect_wan();
 if (!wr) {
-	let tunnels = [];
-	for (let p in protocol_ids())
-		push(tunnels, tunnel_info(p).tunnel_if);
-	wr = pick_wan_fallback(sh("ip -4 route show default 2>/dev/null"), tunnels);
+	warn("cheburnet: WAN не найден — data-plane не переприменён\n");
+	exit(2);
 }
-// Шрам: первый ifup после загрузки (~20с) может опережать готовность WAN. Применить с
-// сохранённым wan_if тогда — хуже, чем ничего: правило появится, а маршрут в таблицу не ляжет
-// (направляет в пустоту). Поэтому без свежего WAN не применяем вовсе — следующий ifup доведёт.
-if (!wr)
-	exit(0);
 ro.wan_if = wr.wan_if;
 if (wr.wan_gw)
 	ro.wan_gw = wr.wan_gw;
@@ -62,5 +63,20 @@ let rc = run_stdin(sprintf("ucode -R %s/steps/firewall/apply.uc", ENGINE), paylo
 if (rc != 0) {
 	warn("cheburnet: не удалось переприменить data-plane (см. logread)\n");
 	exit(1);
+}
+
+// Сторож мог не появиться на роутере, поставленном до него (пакет обновляется без переустановки),
+// или его cron-запись могла пропасть с чужой правкой crontab. Запись идемпотентна — просто
+// гарантируем её на каждом холодном подъёме WAN.
+sh(sprintf("ucode -R %s/watchdog/cron.uc >/dev/null 2>&1", ENGINE));
+
+// МИГРАЦИЯ установок со старой схемой маршрута (route_allowed_ips='1' → half-routes, см. HALF_ROUTES
+// в steps/vpn/vpn.uc): пакет обновляется без переустановки (postinst зовёт нас). Гейт — само старое
+// значение, повторные запуски ничего не делают.
+if ((saved.protocol ?? default_protocol()) == "awg" &&
+    trim(sh("uci -q get network.awg0_peer.route_allowed_ips 2>/dev/null")) == "1") {
+	sh("logger -t cheburnet 'миграция маршрута туннеля: route_allowed_ips=1 → half-routes'");
+	if (int(trim(sh(sprintf("ucode -R %s/steps/vpn/apply.uc --arm >/dev/null 2>&1; echo $?", ENGINE)))) != 0)
+		warn("cheburnet: миграция маршрута туннеля не удалась (см. logread)\n");
 }
 exit(0);

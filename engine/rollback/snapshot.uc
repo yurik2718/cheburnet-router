@@ -5,17 +5,9 @@
 //   ucode -R snapshot.uc restore  [dir]   # вернуть их из снимка + reload сервисов
 //   ucode -R snapshot.uc commit   [dir]   # успех: выбросить снимок
 
-import { readfile, writefile, mkdir, unlink, rmdir, popen } from "fs";
+import { readfile, writefile, mkdir, unlink, rmdir } from "fs";
+import { sh } from "../lib/proc.uc";
 import { protected_configs } from "./rollback.uc";
-
-// sh(cmd) — запустить команду, вернуть stdout (для reload сервисов).
-function sh(cmd) {
-	let p = popen(cmd, "r");
-	if (!p) return "";
-	let out = p.read("all") ?? "";
-	p.close();
-	return out;
-}
 
 // Пути через env-override (host-тесты гоняют snapshot в sandbox — тот же приём, что
 // ETC_CHEBURNET в run.uc/rpcd-cheburnet). Без env — боевые значения.

@@ -9,9 +9,8 @@ import { stdin, readfile, writefile, unlink, access } from "fs";
 import { sh, run_stdin } from "../lib/proc.uc";
 import { enabled_steps, snapshot_scope, dirty_steps, decide_outcome,
          tunnel_info, disabled_tunnels, default_protocol, handshake_state,
-         protocol_ids, uses_singbox, tunnel_conf } from "./install.uc";
-import { pick_wan_fallback } from "../lib/route.uc";
-import { parse_wan_route } from "../preflight/parse.uc";
+         uses_singbox, tunnel_conf } from "./install.uc";
+import { detect_wan } from "../lib/wan.uc";
 import { evaluate, soft_failed_ids } from "../preflight/preflight.uc";
 import { config_path as sb_config_path } from "../steps/singbox/singbox.uc";
 import { tunnel_connectivity } from "./probe.uc";
@@ -79,7 +78,7 @@ function dns_ok() {
 // поллим ОБА в одном окне (~30с). Разбор по dns_ok/tun_ok/tun_reason — не для этой функции (она
 // только меряет), а для decide_outcome (install.uc), которая по ним строит адресный код для UI.
 function healthcheck(cfg, tunnel_applied) {
-	let iface = (cfg.routing_opts && cfg.routing_opts.tunnel_if) ? cfg.routing_opts.tunnel_if : "awg0";
+	let iface = cfg.routing_opts.tunnel_if ?? tunnel_info(cfg.protocol ?? default_protocol()).tunnel_if;
 	let dns = false, tun = !tunnel_applied, tun_reason = null; // туннель-шаг не применялся → его здоровье не требуем
 	for (let i = 0; i < 15; i++) {
 		if (!dns) dns = dns_ok();
@@ -112,8 +111,8 @@ function rollback_all(steps, cfg) {
 			sh("/etc/init.d/sing-box restart >/dev/null 2>&1");
 	}
 
-	// Snapshot вернул uci-конфиги, но рантайм не сойдётся сам: netifd держит default через awg0
-	// (route_allowed_ips=1) до RESTART (reload недостаточен), а dnsmasq резолвит через мёртвый DoH.
+	// Snapshot вернул uci-конфиги, но рантайм не сойдётся сам: netifd держит маршруты снятого
+	// туннеля до RESTART (reload недостаточен), а dnsmasq резолвит через мёртвый DoH.
 	// Без этого провал установки оставляет LAN без интернета; краткий разрыв на пути отката приемлем.
 	sh("/etc/init.d/network restart >/dev/null 2>&1");
 	sh("/etc/init.d/dnsmasq restart >/dev/null 2>&1");
@@ -141,21 +140,11 @@ let tinfo = tunnel_info(protocol);
 if (type(cfg.routing_opts) != "object") cfg.routing_opts = {};
 cfg.routing_opts.tunnel_if = tinfo.tunnel_if;
 
-// WAN для kill-switch и default-маршрута direct-таблицы. Определяем динамически, не хардкодим
-// (урок v1) — мастер имена интерфейсов не вводит. Первичный источник — netifd (знает WAN даже
-// когда kernel-default уже у туннеля). ИНВАРИАНТ: фолбэк-детект по `ip route` обязан исключать
-// туннельные интерфейсы (awg0/singtun0) — иначе на пере-установке поверх рабочей находит сам
-// туннель вместо WAN. Шлюз обязателен для ethernet (без via ARP на публичные IP молчит, прогон
-// 2026-07-08), но не для PPPoE/p2p (маршрут без nexthop).
+// WAN для kill-switch и default-маршрута direct-таблицы — динамически (lib/wan.uc), не хардкод
+// (урок v1): мастер имена интерфейсов не вводит. Шлюз обязателен для ethernet (без via ARP на
+// публичные IP молчит, прогон 2026-07-08), но не для PPPoE/p2p (маршрут без nexthop).
 if (type(cfg.routing_opts.wan_if) != "string" || length(cfg.routing_opts.wan_if) == 0) {
-	let wr = parse_wan_route(sh("ubus call network.interface.wan status 2>/dev/null"));
-	if (!wr) {
-		// Фолбэк: дефолт-маршрут, минуя туннели (pick_wan_fallback, lib/route.uc, под тестами).
-		let tunnels = [];
-		for (let p in protocol_ids())
-			push(tunnels, tunnel_info(p).tunnel_if);
-		wr = pick_wan_fallback(sh("ip route show default 2>/dev/null"), tunnels);
-	}
+	let wr = detect_wan();
 	if (wr) {
 		cfg.routing_opts.wan_if = wr.wan_if;
 		if (wr.wan_gw)
@@ -303,6 +292,10 @@ if (outcome.action == "commit") {
 	if (tunnel_applied)
 		run_stdin(step_cmd(tinfo.step, " --arm"), "");
 	sh(sprintf("ucode -R %s/rollback/snapshot.uc commit", ENGINE));
+	// Сторож: с этого момента роутер живёт годами сам, и раз в 5 минут кто-то должен смотреть,
+	// на месте ли data-plane (engine/watchdog). Ставим ТОЛЬКО на успешном пути — на откате
+	// сторожить нечего.
+	sh(sprintf("ucode -R %s/watchdog/cron.uc >/dev/null 2>&1", ENGINE));
 	// WAN нашли МЫ (детект выше), мастер его не знает — персистим в install.json: set_mode
 	// переприменяет firewall без run.uc, а без wan_if kill-switch не строится.
 	let cfg_file = ETC_CHEBURNET + "/install.json";

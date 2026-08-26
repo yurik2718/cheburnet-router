@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from 'svelte';
-  import { cheburnet, login, isLoggedIn, logout } from '../ubus.js';
+  import { cheburnet, login, isLoggedIn, logout, isAccessDenied } from '../ubus.js';
   import { hs, FORCED_LABELS, heroKind, tunnelFallback, switchTargets, tunnelRowText,
            explainFullTierFail, fullMissingText, protocolInfo, checkConf, BRUTAL_WARNING,
            withDeclaredSpeed, SPEED_DEFAULTS, SUPPORT } from '../logic.js';
@@ -27,6 +27,18 @@
   // сообщение печатается у той группы кнопок, которая его вызвала.
   let actionScope = $state('manage'); // manage | restart | dns | replace | switch | full | danger
   let busy = $state(false);
+  // Подряд неудачные опросы фоновой операции = страница потеряла роутер (сменился адрес, ребут
+  // посреди операции). Раньше catch глотал всё: «Применяю…» висело до F5 при заблокированной
+  // панели. Тот же порог, что у мастера (Installing.svelte).
+  let pollFails = $state(0);
+  function pollLost(scope) {
+    pollFails++;
+    if (pollFails !== 4) return;
+    busy = false;
+    actionScope = scope;
+    action = 'Страница потеряла связь с роутером — операция продолжается на нём самом. '
+      + 'Обновите страницу через минуту; если менялся адрес роутера — откройте новый.';
+  }
   // Замена сервера АКТИВНОГО туннеля: одно поле, метод и подпись — из каталога протоколов.
   let replaceConf = $state('');
   let replacePhase = $state('idle'); // idle | running | ok | fail
@@ -70,8 +82,8 @@
     }
   }
 
-  // Управляющие действия — admin-методы. Без сессии (или с протухшей) ubus отдаёт
-  // PERMISSION_DENIED — открываем модалку входа, а не показываем голую ошибку.
+  // Управляющие действия — admin-методы. Без сессии (или с протухшей) — отказ доступа
+  // (isAccessDenied, ubus.js) — открываем модалку входа, а не показываем голую ошибку.
   async function admin(label, fn, scope = 'manage') {
     busy = true;
     action = '';
@@ -84,8 +96,8 @@
       if (action === '') action = `${label} — готово.`;
       await refresh();
     } catch (e) {
-      if (e.message.includes('PERMISSION_DENIED')) {
-        logout(); // протухшую сессию выбрасываем
+      if (isAccessDenied(e)) {
+        logout(); // протухшую сессию (или её отсутствие) выбрасываем
         loggedIn = false;
         loginOpen = true;
         action = `${label}: нужен вход — введите пароль роутера.`;
@@ -97,12 +109,13 @@
     }
   }
 
-  // needLogin(e, what) — общая обработка PERMISSION_DENIED для фоновых операций (они не идут
-  // через admin(), потому что там свой поллинг прогресса).
+  // needLogin(e, what) — общая обработка отказа доступа (isAccessDenied — обе его формы, см.
+  // ubus.js) для фоновых операций (они не идут через admin(), потому что там свой поллинг
+  // прогресса).
   function needLogin(e, what, scope = 'manage') {
     busy = false;
     actionScope = scope;
-    if (e.message.includes('PERMISSION_DENIED')) {
+    if (isAccessDenied(e)) {
       logout(); loggedIn = false; loginOpen = true;
       action = `${what}: нужен вход — введите пароль роутера.`;
     } else {
@@ -144,6 +157,17 @@
     });
   const restart = (service, label) =>
     admin(`Перезапуск: ${label}`, () => cheburnet('service_restart', { service }), 'restart');
+
+  // Аварийный режим: последнее средство, когда туннель не поднять, а интернет нужен сейчас.
+  // Подтверждение обязательно — человек выключает защиту, и он должен это осознать.
+  const pauseProtection = () => {
+    if (!confirm('Выключить защиту и пустить интернет напрямую?\n\n'
+      + 'Сайты откроются сразу, но трафик перестанет идти через VPN, а kill-switch будет снят.\n'
+      + 'Настройки сохранятся — вернуть защиту можно одной кнопкой.')) return;
+    return admin('Аварийный режим', () => cheburnet('pause_protection'), 'emergency');
+  };
+  const resumeProtection = () =>
+    admin('Возврат защиты', () => cheburnet('resume_protection'), 'emergency');
   // DNS-провайдер = уровень фильтрации (реклама/семейный/без). Выбор из каталога (status.dns_providers).
   let providerSel = $state('');
 
@@ -244,6 +268,7 @@
   async function pollReplace() {
     try {
       const p = await cheburnet('install_progress');
+      pollFails = 0;
       replaceLog = p.log ?? '';
       if (p.done) {
         clearInterval(replaceTimer);
@@ -265,7 +290,7 @@
         await refresh();
       }
     } catch {
-      // единичный сбой поллинга не валим — следующий тик повторит
+      pollLost('replace');
     }
   }
 
@@ -317,6 +342,7 @@
   async function pollReset() {
     try {
       const p = await cheburnet('install_progress');
+      pollFails = 0;
       if (!p.done) return;
       clearInterval(resetTimer); resetTimer = null;
       actionScope = 'danger';
@@ -330,7 +356,7 @@
           + 'Соберите диагностику (блок «Если что-то не работает») и пришлите её.';
       }
       await refresh();
-    } catch { /* единичный сбой поллинга — следующий тик повторит */ }
+    } catch { pollLost('danger'); }
   }
 
   refresh();
@@ -370,6 +396,7 @@
   async function pollSwitch() {
     try {
       const p = await cheburnet('install_progress');
+      pollFails = 0;
       switchLog = p.log ?? '';
       if (p.done) {
         clearInterval(switchTimer); switchTimer = null; busy = false;
@@ -387,7 +414,7 @@
         }
         await refresh();
       }
-    } catch { /* единичный сбой поллинга — следующий тик повторит */ }
+    } catch { pollLost('switch'); }
   }
 
   // Full-тир (opt-in): кнопка догружает компонент sing-box фоном. Прогресс — тот же канал
@@ -406,6 +433,7 @@
   async function pollFull() {
     try {
       const p = await cheburnet('install_progress');
+      pollFails = 0;
       fullLog = p.log ?? '';
       if (p.done) {
         clearInterval(fullTimer); fullTimer = null; busy = false;
@@ -421,7 +449,7 @@
         }
         await refresh();
       }
-    } catch { /* единичный сбой поллинга — следующий тик повторит */ }
+    } catch { pollLost('full'); }
   }
 </script>
 
@@ -463,6 +491,20 @@
   {#if error}<p class="warn">{error}</p>{/if}
 
   {#if s}
+    <!-- Аварийный режим — ВЫШЕ всего остального: это главное, что сейчас происходит с роутером.
+         Молча снятая защита недопустима, поэтому говорим прямо, что именно выключено, и рядом
+         держим кнопку возврата. Пока он включён, hero-статус туннеля не показываем: он бы
+         спорил сам с собой («туннель не работает» при осознанно снятой защите). -->
+    {#if s.paused}
+      <p class="banner">
+        <strong>Аварийный режим: защита выключена.</strong> Интернет идёт напрямую, мимо VPN:
+        трафик виден провайдеру, kill-switch и разделение по списку сняты. Настройки сохранены.
+      </p>
+      <div class="row">
+        <Button disabled={busy} onclick={resumeProtection}>Вернуть защиту</Button>
+      </div>
+      {@render actionNote('emergency')}
+    {:else}
     <!-- Hero-статус: с ОДНОГО взгляда «всё работает / есть проблема + что делать». Здоровье
          туннеля даёт движок (status.tunnel_health) — он знает, чем мерить активный протокол;
          панель лишь подбирает формулировку и путь к починке (якоря блоков ниже). -->
@@ -472,6 +514,21 @@
         списка «напрямую». Попробуйте кнопку «Туннель» в «Перезапуске сервисов»; не помогло —
         <a href="#replace-tunnel" onclick={() => (tunnelOpen = true)}>вставьте свежий конфиг</a>.
       </p>
+      <!-- Честность о деградации: DNS в этот момент работает РЕЗЕРВНЫМ путём мимо туннеля, и
+           человек имеет право знать, что именно изменилось в его приватности. Молчаливая
+           деградация хуже самой деградации. В поездке резервного пути нет намеренно. -->
+      {#if s.mode === 'travel'}
+        <p class="note">
+          Режим «в поездке»: резервный путь для DNS отключён намеренно — в чужой сети наружу не
+          должно уходить ничего, даже запросы к DNS. Поэтому сейчас не открывается ничего.
+        </p>
+      {:else}
+        <p class="note">
+          Пока туннель лежит, DNS работает резервным путём мимо туннеля. Запросы остаются
+          зашифрованными, но провайдер видит сам факт обращения к DNS-резолверу. Туннель
+          поднимется — сторож вернёт DNS в него сам, в течение нескольких минут.
+        </p>
+      {/if}
       <!-- Ведём к запасному пути ровно в тот момент, когда он нужен, а не прячем его в конце
            страницы. ВАЖНО: с AmneziaWG предлагаем именно VLESS+Reality. Hysteria2 работает по
            UDP, как и AmneziaWG, поэтому сеть, которая режет UDP, ломает их вместе — предлагать
@@ -502,6 +559,21 @@
         конфиг ниже, прежний вернётся сам при неудаче.</p>
     {:else if hero === 'up'}
       <p class="ok-msg">Всё работает: VPN активен, трафик защищён.</p>
+    {/if}
+
+    <!-- Аварийная кнопка — ТОЛЬКО когда туннель действительно не работает: предлагать снять
+         защиту на исправной системе значит подталкивать к тому, чего человек не просил. Это
+         последнее средство после «перезапустить» и «свежий конфиг», поэтому и стоит последним. -->
+    {#if hero === 'down'}
+      <p class="note">
+        Ничего не помогло, а интернет нужен прямо сейчас? Можно временно выключить защиту —
+        трафик пойдёт напрямую, мимо VPN. Настройки сохранятся, вернуть защиту — одной кнопкой.
+      </p>
+      <div class="row">
+        <Button disabled={busy} onclick={pauseProtection}>Выключить защиту (аварийно)</Button>
+      </div>
+      {@render actionNote('emergency')}
+    {/if}
     {/if}
 
     <!-- Тревожный (красный) баннер — ТОЛЬКО когда direct-доменов вообще нет: тогда split не
@@ -660,7 +732,7 @@
           <strong>Текущий туннель продолжит работать.</strong></p>
         <details class="more">
           <summary>Подробнее</summary>
-          <p class="muted small">Компонент ставится один раз и занимает в памяти роутера ~30 МБ.
+          <p class="muted small">Компонент ставится один раз и занимает на флеше роутера ~42 МБ.
             Переключиться можно потом, когда появится ссылка от сервера, и так же вернуться назад.</p>
         </details>
         <div class="row">

@@ -178,4 +178,65 @@ test("build_firewall_plan: хук лежит в плане, номер табл�
 	ok(length(p.hotplug_file) > 0);
 });
 
+// `ip rule add` не идемпотентен: без снятия повторное применение плодит дубли правил, и
+// диагностика «кто владеет маршрутом» превращается в гадание.
+test("ip_teardown снимает и правило резервного DNS (иначе дубли при переприменении)", () => {
+	let plan = build_firewall_plan(build_plan([], { wan_if: "eth0", dns_uid: 101 }), null);
+	let td = join("\n", plan.ip_teardown);
+	ok(index(td, "ip rule del uidrange 101-101 lookup 100") >= 0);
+	ok(index(td, "ip -6 rule del uidrange 101-101 lookup 100") >= 0);
+});
+
+test("без dns_uid teardown правила uidrange не содержит", () => {
+	let plan = build_firewall_plan(build_plan([], { wan_if: "eth0" }), null);
+	ok(index(join("\n", plan.ip_teardown), "uidrange") < 0);
+});
+
+// Гейт хука — то место, где «правило есть» пропускало ПРОТУХШИЙ маршрут: шлюз/интерфейс WAN
+// сменился, правило целое, дефолт в таблице есть — а direct-сайты мертвы, и чинить некому.
+test("hotplug-гейт сверяет маршрут таблицы с ТЕКУЩИМ WAN, а не с «хоть каким-то»", () => {
+	let plan = build_firewall_plan(build_plan([], { wan_if: "eth0" }), { tunnel_if: "awg0" });
+	let h = plan.hotplug_file;
+	ok(index(h, "ip -4 route show default") >= 0, "текущий WAN берётся из ядра, а не из install.json");
+	ok(index(h, "grep -v ' dev awg0'") >= 0, "туннель за WAN не считаем");
+	ok(index(h, "\"$cur\" = \"$tab\"") >= 0, "сравнение, а не проверка наличия");
+	ok(index(h, "grep -q fwmark") >= 0, "правило направления тоже обязано быть");
+	ok(index(h, "reapply.uc") >= 0, "не сошлось — зовём переприменение");
+});
+
+// В travel правил направления нет ПО ЗАМЫСЛУ (render_iprules пуст) — гейт по fwmark никогда не
+// сходился, и хук переприменял firewall (uci commit + fw4 reload + ip flush) на КАЖДЫЙ ifup любого
+// интерфейса. Целостность «поездки» — kill-switch в ядре, по нему и гейтим.
+test("hotplug-гейт в travel: по kill-switch в ядре, а не по правилу fwmark (его там нет)", () => {
+	let plan = build_firewall_plan(build_plan([], { wan_if: "eth0", mode: "travel" }), null);
+	let h = plan.hotplug_file;
+	ok(index(h, "grep -q fwmark") < 0, "правила направления в travel не бывает — по нему не гейтим");
+	ok(index(h, "nft list chain inet fw4 cheburnet_ks") >= 0, "имя цепочки — из плана, не хардкод хука");
+	ok(index(h, "grep -q drop") >= 0, "пустая цепочка после fw4 reload — не «на месте»");
+	ok(index(h, "reapply.uc") >= 0, "не сошлось — зовём переприменение");
+	let home = build_firewall_plan(build_plan([], { wan_if: "eth0", mode: "home" }), null).hotplug_file;
+	ok(index(home, "grep -q fwmark") >= 0, "home-гейт не тронут");
+});
+
+// Установка/замена сервера сама двигает сеть (network reload → ifup): хук, запустивший reapply.uc
+// параллельно с шагами run.uc, применял бы firewall дважды и вразнобой.
+test("hotplug-хук молчит, пока идёт длинная операция движка (pid-файл + done-маркер ubus-слоя)", () => {
+	let h = render_hotplug(100);
+	ok(index(h, "/tmp/cheburnet/pid") >= 0 && index(h, "/tmp/cheburnet/done") >= 0,
+		"та же конвенция занятости, что у rpcd и сторожа");
+	ok(index(h, 'kill -0 "$p"') >= 0 && index(h, '[ -n "$p" ]') >= 0,
+		"пустой pid отсекаем ДО kill: busybox kill -0 '' = сигнал своей группе = ложное «занято»");
+});
+
+// ШРАМ (qemu-emergency, 2026-08-26): в travel teardown был пуст — после home→travel правила
+// fwmark/uidrange оставались в ядре, и «в поездке мимо туннеля не уходит ничего» было ложью.
+test("travel: teardown снимает правила направления прежнего режима, setup ничего не ставит", () => {
+	let plan = build_firewall_plan(build_plan([], { wan_if: "eth0", mode: "travel", dns_uid: 101 }), null);
+	let td = join("\n", plan.ip_teardown);
+	ok(index(td, "ip rule del fwmark 0x1 lookup 100") >= 0, "правило направления home снимается");
+	ok(index(td, "ip rule del uidrange 101-101 lookup 100") >= 0, "резервный DNS в поездке мимо туннеля не ходит");
+	ok(index(td, "ip route flush table 100") >= 0);
+	deep_eq(plan.ip_setup, [], "в travel правил направления нет по замыслу");
+});
+
 exit(summary());

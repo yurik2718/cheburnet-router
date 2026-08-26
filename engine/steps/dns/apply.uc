@@ -1,10 +1,6 @@
-// apply.uc — применение DNS-шага на роутере (импурно, router-side).
-//
-//   echo '{"domains":["example.com"]}' | ucode -R apply.uc            # применить
-//   echo '{"domains":["example.com"]}' | ucode -R apply.uc --dry-run  # только показать план
-//
-// Читает текущее состояние из uci, строит план чистым ядром (dns.uc), применяет через
-// `uci batch` + commit, перезагружает dnsmasq. Импурная часть — QEMU; логика плана — dns/tests.
+// apply.uc — применение DNS-шага (импурно): текущее состояние из uci → план (dns.uc, тесты: tests/)
+// → `uci batch` + commit → reload dnsmasq.
+//   echo '{"domains":["example.com"]}' | ucode -R apply.uc [--dry-run]
 
 import { stdin } from "fs";
 import { sh, uci_batch } from "../../lib/proc.uc";

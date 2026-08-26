@@ -1,13 +1,5 @@
-// preflight.uc — гейткипер железа/версии/зависимостей (чистая логика, без роутера).
-//
-// Перед ЛЮБЫМИ изменениями движок проверяет, потянет ли железо стек, и честно отказывает
-// с понятным сообщением (см. docs/kb/architecture/reliability.md, hardware-requirements.md).
-//
-// Разделение ради тестируемости:
-//   • evaluate(facts, req) — ЧИСТАЯ оценка: на вход факты о системе → структурный отчёт.
-//     Юнит-тестируется без роутера (engine/preflight/tests).
-//   • сбор фактов (чтение /proc, ubus, uci, apk --simulate) — НЕ здесь: это router-side
-//     companion (gather), он импурный и проверяется в QEMU. Граница честная, не пропуск.
+// preflight.uc — гейткипер железа/версии/зависимостей: evaluate(facts, req) → отчёт (чистая логика,
+// тесты: tests/). Факты собирает gather.uc (импурно, QEMU). Подробно: [[reliability]], [[hardware-requirements]].
 
 // Требования по умолчанию.
 // ИНВАРИАНТ: пороги калиброваны по MemTotal/свободному overlay, а не по паспорту железа — kernel
@@ -116,30 +108,17 @@ function valid_lan_ip(ip) {
 	return x >= 0 && x <= 255 && y >= 1 && y <= 254;
 }
 
-// check(id, ok, detail, fix, severity) — один результат проверки. fix показываем только при
-// провале. severity ∈ "hard" | "soft" (по умолчанию hard — новая проверка блокирует, пока
-// автор осознанно не решит иначе; fail-safe направление гейткипера).
-//
-// ЧТО ЗНАЧИТ SOFT: провал ухудшает работу, но установка МОЖЕТ пройти, а провал шага — откатиться
-// (нехватка флеша/RAM). Такое разрешаем пропустить осознанным решением владельца (accept_risk).
-// HARD непропускаем принципиально: без нужной arch/версии/пакетов apk просто не найдёт файлы —
-// «пропуск» обещал бы невозможное и стоил бы человеку времени вместо честного отказа.
+// check(id, ok, detail, fix, severity) — один результат; fix только при провале. severity: "hard"
+// (дефолт: arch/версия/пакеты — apk просто не найдёт файлы, пропуск обещал бы невозможное) |
+// "soft" (флеш/RAM впритык — установка может пройти; пропускается осознанно, accept_risk).
 function check(id, ok, detail, fix, severity) {
 	return { id: id, ok: ok, detail: detail, fix: ok ? null : fix,
 	         severity: severity ?? "hard" };
 }
 
-// evaluate(facts, req) — собрать отчёт preflight. passed=false, если хоть одна проверка
-// провалена. Это гейткипер: при passed=false движок НЕ трогает систему.
-//
-// Кроме passed отчёт несёт разбивку по severity — на ней стоит режим «поставить на свой страх
-// и риск» (см. check выше и check.uc --allow-soft):
-//   hard_failed  — провалы, которые пропустить нельзя (arch/версия/пакеты/LAN-конфликт);
-//   soft_failed  — провалы железа-впритык (флеш/RAM);
-//   overridable  — есть провалы, и ВСЕ они soft → владелец вправе установить как есть.
-//
-// facts: { arch, openwrt_version, flash_free_mb, ram_total_mb,
-//          deps_installable: {pkg: bool}, lan_cidr, wan_cidr }
+// evaluate(facts, req) → { passed, checks, hard_failed, soft_failed, overridable }. passed=false →
+// движок систему не трогает; overridable = все провалы soft → владелец вправе поставить как есть.
+// facts: { arch, openwrt_version, flash_free_mb, ram_total_mb, deps_installable: {pkg: bool}, lan_cidr, wan_cidr }
 function evaluate(facts, req) {
 	let r = resolve_req(req);
 	let checks = [];
@@ -264,18 +243,10 @@ function full_hw_missing(arch, ram_mb, flash_mb, req) {
 	return out;
 }
 
-// supports_full_hw(arch, ram_mb, flash_mb, req) → «железо ПОТЯНЕТ Full» (нечего не хватает).
-function supports_full_hw(arch, ram_mb, flash_mb, req) {
-	return length(full_hw_missing(arch, ram_mb, flash_mb, req)) == 0;
-}
-
-// evaluate_tiers(facts, req) → { light, full, full_installed, full_checks, full_failed }.
-//   light          — проходит ли базовый гейткипер (Full живёт на том же базовом стеке).
-//   full           — «железо ПОТЯНЕТ Full» (capable: light И AES-arch И RAM/флеш И бинарь
-//                    установим). ИНВАРИАНТ: гейт железа ОДИН на оба Full-протокола (тот же
-//                    бинарь/TUN/цена в userspace) — ветвление по шагу, не по протоколу.
-//   full_installed — sing-box РЕАЛЬНО стоит (opt-in, не при bootstrap). capable ≠ installed.
-// req.full — вложенные кастомные пороги Full (тесты); req (верхний) идёт в Light-evaluate.
+// evaluate_tiers(facts, req) → { light, full, full_installed, full_checks, full_failed }: light —
+// базовый гейт; full — железо ПОТЯНЕТ Full (light ∧ AES-arch ∧ RAM/флеш ∧ бинарь установим);
+// full_installed — sing-box реально стоит (capable ≠ installed). req.full — пороги Full (тесты).
+// ИНВАРИАНТ: гейт железа ОДИН на оба Full-протокола — ветвление по шагу, не по протоколу.
 function evaluate_tiers(facts, req) {
 	let light = evaluate(facts, req);
 	let fr = resolve_full_req(req ? req.full : null);
@@ -342,4 +313,4 @@ function render_report(report, allow_soft) {
 	return out;
 }
 
-export { default_requirements, cmp_version, cidr_overlap, suggest_lan, valid_lan_ip, evaluate, soft_failed_ids, full_requirements, supports_full_hw, full_hw_missing, evaluate_tiers, render_report };
+export { default_requirements, cmp_version, cidr_overlap, suggest_lan, valid_lan_ip, evaluate, soft_failed_ids, full_requirements, full_hw_missing, evaluate_tiers, render_report };

@@ -13,7 +13,7 @@ vi.stubGlobal('sessionStorage', {
   removeItem: (k) => store.delete(k),
 });
 
-const { call, cheburnet, login, logout, isLoggedIn } = await import('./ubus.js');
+const { call, cheburnet, login, logout, isLoggedIn, isAccessDenied } = await import('./ubus.js');
 
 // Хелпер: следующий fetch вернёт этот JSON-RPC ответ (200 OK).
 function fetchReturns(json) {
@@ -101,5 +101,22 @@ describe('login/logout: жизненный цикл admin-сессии', () => {
     await cheburnet('status');
     const sent = JSON.parse(mock.mock.calls[0][1].body);
     expect(sent.params[0]).toBe('00000000000000000000000000000000');
+  });
+});
+
+describe('isAccessDenied: обе формы отказа доступа — экраны должны открыть вход на любую', () => {
+  it('ubus-статус PERMISSION_DENIED (сессия протухла/не хватает прав)', () => {
+    expect(isAccessDenied(new Error('ubus отклонил вызов: PERMISSION_DENIED'))).toBe(true);
+  });
+
+  it('JSON-RPC error "Access denied" (сессии вовсе не было — uhttpd отсекает ДО ubus)', () => {
+    // ШРАМ: до этого теста экраны ловили только вариант выше — первый заход без входа
+    // показывал голое «Access denied» вместо модалки логина (см. Status.svelte).
+    expect(isAccessDenied(new Error('ubus RPC: Access denied'))).toBe(true);
+  });
+
+  it('несвязанная ошибка — не открываем вход зря', () => {
+    expect(isAccessDenied(new Error('сеть недоступна: fail'))).toBe(false);
+    expect(isAccessDenied(new Error('неверный install-токен'))).toBe(false);
   });
 });

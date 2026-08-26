@@ -56,7 +56,7 @@ function network_sections(opts) {
 }
 
 // build_net_plan(opts) → { teardown, setup } — маршрут «весь трафик в туннель» держит netifd,
-// не sing-box (у sing-box TUN, в отличие от AWG route_allowed_ips=1, маршрут сам не ставит).
+// не sing-box (auto_route=false). Тот же механизм и у AWG — см. steps/vpn/vpn.uc HALF_ROUTES.
 // ИНВАРИАНТ: half-routes 0.0.0.0/1 + 128.0.0.0/1, не один default — специфичнее WAN-дефолта,
 // значит побеждают его без удаления WAN. WAN обязан остаться (direct уходит через него, и сам
 // sing-box коннектится к серверу через него же) — apply.uc проверяет это ПЕРЕД стартом сервиса.
@@ -470,13 +470,9 @@ function build_hysteria2_config(fields, opts) {
 	return { ok: true, errors: [], config: wrap_outbound(o, out) };
 }
 
-// parse_input(text) → { ok, errors, config, source }. Диспетч входа:
-//   • "vless://…"                 → Reality: разобрать ссылку и сгенерировать конфиг.
-//   • "hysteria2://…" / "hy2://…" → Hysteria2: то же самое своей парой функций.
-//   • "{…}"                       → сырой JSON sing-box (advanced): должен содержать массив
-//                                   outbounds. Доверяем структуре пользователя, но проверяем
-//                                   минимум (граница доверия).
-// source различает ветки для UI/логов: "link" (vless), "hy2", "json".
+// parse_input(text) → { ok, errors, config, source }: "vless://" → Reality, "hysteria2://"/"hy2://" →
+// Hysteria2, "{…}" → сырой JSON sing-box (нужен массив outbounds — минимум границы доверия).
+// source ("link" | "hy2" | "json") — для UI/логов.
 function parse_input(text, opts) {
 	let raw = trim(text ?? "");
 	if (length(raw) == 0)

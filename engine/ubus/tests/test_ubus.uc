@@ -6,7 +6,7 @@ import { test, eq, ok, deep_eq, summary } from "../../lib/assert.uc";
 import { readfile } from "fs";
 import {
 	list_descriptor, validate_request, requires_token,
-	acl_split, build_acl, make_error, method_specs
+	acl_split, build_acl, make_error
 } from "../ubus.uc";
 
 // --- список методов / дескриптор ---
@@ -137,10 +137,10 @@ test("validate: enum mode — только home|travel", () => {
 	eq(r.error, "mode must be one of: home, travel", "сообщение enum");
 });
 
-test("validate: update_list — url необязателен", () => {
-	eq(validate_request("update_list", {}).ok, true, "без url ок (дефолтный источник)");
-	eq(validate_request("update_list", { url: "https://e/x" }).ok, true, "с url ок");
-	eq(validate_request("update_list", { url: 5 }).ok, false, "url не строка → ошибка");
+test("validate: update_list — без аргументов; источник списка — решение проекта, не настройка", () => {
+	let r = validate_request("update_list", { url: "https://e/x" });
+	eq(r.ok, true);
+	ok(!exists(r.value, "url"), "чужой url отброшен на границе доверия");
 });
 
 // --- валидация: admin-методы Фазы B ---
@@ -224,6 +224,20 @@ test("validate: apply_lan_ip — ip и token обязательны", () => {
 
 // --- ACL выводится из реестра ---
 
+// Аварийный режим — мутация уровня владельца: анониму из LAN нельзя снимать защиту чужого
+// роутера, а токен тут не при чём (он про этап установки, а не про жизнь после неё).
+test("validate: pause_protection/resume_protection — admin, без аргументов и токена", () => {
+	for (let m in [ "pause_protection", "resume_protection" ]) {
+		let r = validate_request(m, {});
+		ok(r.ok, m + " не требует аргументов");
+		ok(!requires_token(m), m + " не требует install-токена");
+	}
+	let acl = acl_split();
+	ok(index(acl.admin.write, "pause_protection") >= 0, "pause_protection — только админу");
+	ok(index(acl.admin.write, "resume_protection") >= 0, "resume_protection — только админу");
+	ok(index(acl.unauth.write, "pause_protection") < 0, "и точно не аноним из LAN");
+});
+
 test("acl_split: тиры выведены из реестра", () => {
 	let s = acl_split();
 	deep_eq(s.unauth.read, [ "preflight", "status", "check_lan_conflict", "install_progress" ], "anon read");
@@ -263,12 +277,6 @@ test("rpcd-acl.json синхронен с реестром (build_acl)", () => {
 test("make_error: базовая и с extra", () => {
 	deep_eq(make_error("oops"), { error: "oops" }, "только error");
 	deep_eq(make_error("busy", { pid: 7 }), { error: "busy", pid: 7 }, "error + extra");
-});
-
-test("method_specs: глубокая копия (мутация не трогает реестр)", () => {
-	let a = method_specs();
-	a[0].name = "MUT";
-	eq(method_specs()[0].name, "preflight", "реестр не изменился");
 });
 
 exit(summary());

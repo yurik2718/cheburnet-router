@@ -1,17 +1,12 @@
-// apply.uc — применение VPN-шага на роутере (импурно): teardown → uci batch → перезапуск сети,
-// чтобы netifd поднял awg0. Логика плана — в vpn.uc (тесты: vpn/tests); битый .conf → plan.ok=false.
-//   cat awg0.conf | ucode -R apply.uc [--dry-run]
-//   cat awg0.conf | ucode -R apply.uc --no-arm     # применить, БЕЗ route_allowed_ips=1
-//   ucode -R apply.uc --arm             # довооружить (route_allowed_ips=1 + reload)
-//   ucode -R apply.uc --teardown        # снять awg0 (смена протокола на reality)
-//
-// --no-arm/--arm — та же логика, что у steps/singbox/apply.uc: только для первой установки
-// (run.uc), см. комментарий там и [[reliability]].
+// apply.uc — применение VPN-шага (импурно): teardown → uci batch → reload, чтобы netifd поднял awg0.
+// План — vpn.uc (тесты: vpn/tests). Флаги: --dry-run | --no-arm (без half-routes, первая установка) |
+// --arm (довооружить) | --disarm (снять маршрут, конфиг оставить — аварийный режим) | --teardown.
 
 import { stdin, popen } from "fs";
 import { sh, uci_batch } from "../../lib/proc.uc";
-import { pick_wan_fallback } from "../../lib/route.uc";
-import { parse_awg_conf, build_vpn_plan, owned_sections } from "./vpn.uc";
+import { wait_wan_default } from "../../lib/wan.uc";
+import { parse_awg_conf, build_vpn_plan, build_arm_ops, build_disarm_ops,
+         owned_sections } from "./vpn.uc";
 
 // dev_present(iface) — создал ли netifd kernel-устройство интерфейса (ip link).
 function dev_present(iface) {
@@ -19,20 +14,52 @@ function dev_present(iface) {
 }
 
 let teardown = (length(ARGV) > 0 && ARGV[0] == "--teardown");
+let disarm   = (length(ARGV) > 0 && ARGV[0] == "--disarm");
 let dry      = (length(ARGV) > 0 && ARGV[0] == "--dry-run");
 let no_arm   = (length(ARGV) > 0 && ARGV[0] == "--no-arm");
 let arm_only = (length(ARGV) > 0 && ARGV[0] == "--arm");
 
-// --arm: довооружить уже применённый (--no-arm) интерфейс — только route_allowed_ips=1 + reload,
-// без пересборки плана из stdin (его и не подать: соединение уже поднято под предыдущим конфигом).
+// --arm: довооружить уже применённый (--no-arm) интерфейс — только half-routes + reload, без
+// пересборки плана из stdin (его и не подать: соединение уже поднято под предыдущим конфигом).
+// Он же путь МИГРАЦИИ установок со старой схемой (route_allowed_ips='1' → '0' + half-routes),
+// поэтому идемпотентен и заканчивается проверкой WAN-дефолта.
 if (arm_only) {
-	let peersect = owned_sections({})[1];
-	let rc = uci_batch([ sprintf("set network.%s.route_allowed_ips='1'", peersect) ], "network");
+	let arm = build_arm_ops({});
+	// delete по одной через `uci -q`: отсутствие секций — норма (первое вооружение), а uci_batch
+	// считает сбоем любой вывод.
+	for (let i = 0; i < length(arm.teardown); i++) {
+		let d = popen(sprintf("uci -q %s", arm.teardown[i]), "r");
+		if (d) d.close();
+	}
+	let rc = uci_batch(arm.setup, "network");
 	if (rc != 0)
 		die(sprintf("vpn/apply: uci batch (arm) вернул %d", rc));
+	// reload, а НЕ ifup: netifd ставит добавленные route-секции без перезапуска интерфейса
+	// (проверено обоими способами в qemu-route-fallback). Перезапуск здесь был бы вреден — туннель мигал
+	// бы ровно тогда, когда health-check его только что подтвердил.
 	let p = popen("/etc/init.d/network reload >/dev/null 2>&1", "r");
 	if (p) p.close();
-	printf("vpn: маршрут вооружён (route_allowed_ips=1 на %s)\n", peersect);
+	let ifname = owned_sections({})[0];
+	let wan_ok = wait_wan_default();
+	printf("vpn: маршрут вооружён (half-routes на %s, WAN-дефолт %s)\n",
+		ifname, wan_ok ? "на месте" : "НЕ вернулся — смотрите wan в netifd");
+	exit(0);
+}
+
+// --disarm: снять ТОЛЬКО маршрут (аварийный режим). Интерфейс и ключи остаются — вернуть защиту
+// можно одним --arm, не спрашивая у человека конфиг заново.
+if (disarm) {
+	let d = build_disarm_ops({});
+	for (let i = 0; i < length(d.teardown); i++) {
+		let p = popen(sprintf("uci -q %s", d.teardown[i]), "r");
+		if (p) p.close();
+	}
+	let rc = uci_batch(d.setup, "network");
+	if (rc != 0)
+		die(sprintf("vpn/apply: uci batch (disarm) вернул %d", rc));
+	let p = popen("/etc/init.d/network reload >/dev/null 2>&1", "r");
+	if (p) p.close();
+	printf("vpn: маршрут снят (half-routes убраны, конфиг %s на месте)\n", owned_sections({})[0]);
 	exit(0);
 }
 
@@ -45,22 +72,11 @@ if (teardown) {
 	for (let i = 0; i < length(sects); i++)
 		push(ops, "delete network." + sects[i]);
 	uci_batch(ops, "network");
-	// ШРАМ: awg0 с route_allowed_ips='1' замещает WAN-дефолт в main; после снятия awg0 в main не
-	// остаётся ни одного дефолта, и следующий шаг (sing-box) не может соединиться с сервером
-	// («no route to internet» при переключении AWG → Full-тир). Поэтому явно возвращаем и ЖДЁМ
-	// WAN-маршрут (ifdown/ifup у netifd асинхронные) — невозврат здесь не фатален, это подхватит
-	// предусловие следующего шага. Подробно: [[0004-multi-protocol-tiers]] (п.1).
-	sh("ifup wan >/dev/null 2>&1");
-	let wan_back = false;
-	for (let i = 0; i < 10; i++) {
-		if (pick_wan_fallback(sh("ip -4 route show default 2>/dev/null"), [ sects[0], "singtun0" ]) != null) {
-			wan_back = true;
-			break;
-		}
-		sh("sleep 1");
-	}
+	// Следующий шаг (sing-box) обязан достучаться до сервера через WAN (см. lib/wan.uc). Невозврат
+	// здесь не фатален: подхватит предусловие следующего шага.
+	let wan_back = wait_wan_default();
 	printf("vpn: teardown выполнен (интерфейс %s снят из network, WAN-маршрут %s)\n",
-		sects[0], wan_back ? "вернулся" : "НЕ вернулся — смотрите wan в netifd");
+		sects[0], wan_back ? "на месте" : "НЕ вернулся — смотрите wan в netifd");
 	exit(0);
 }
 

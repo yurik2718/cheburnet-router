@@ -1,23 +1,10 @@
-// apply.uc — применение sing-box шага на роутере (импурно, router-side).
-//
-//   cat vless.txt | ucode -R apply.uc              # применить (сразу вооружает half-routes)
-//   cat vless.txt | ucode -R apply.uc --dry-run    # только показать артефакты
-//   cat vless.txt | ucode -R apply.uc --no-arm     # применить, БЕЗ ifup — маршрут не вооружён
-//   ucode -R apply.uc --arm                        # довооружить (ifup) уже применённый шаг
-//   ucode -R apply.uc --teardown                   # снять (выключить сервис, убрать конфиг)
-//
-// --no-arm/--arm — только для первой установки (run.uc): health-check должен успеть
-// подтвердить туннель ДО того, как половину дома переключит на него (см. [[reliability]],
-// решение владельца проекта — окно ДО первого commit защищать нечем, дальше жить утечкам
-// нельзя). replace_singbox.uc/reapply.uc эти флаги не используют — там kill-switch уже
-// работает непрерывно с прошлой установки, откладывать нечего.
-//
-// Запись config.json → uci-включение сервиса → рестарт sing-box; маршрутизацию в TUN навешивает
-// firewall-шаг. Логика плана — юнит-тесты (singbox/tests); живой стек — QEMU/железо.
+// apply.uc — применение sing-box шага (импурно): config.json → uci-включение → рестарт → ifup TUN.
+// План — singbox.uc (тесты: singbox/tests). Флаги как у steps/vpn/apply.uc: --dry-run | --no-arm
+// (без ifup, первая установка до health-check) | --arm | --disarm | --teardown. См. [[reliability]].
 
 import { stdin, popen } from "fs";
 import { build_singbox_plan, build_net_plan, config_path, service_name, network_sections } from "./singbox.uc";
-import { pick_wan_fallback } from "../../lib/route.uc";
+import { wait_wan_default } from "../../lib/wan.uc";
 import { sh, uci_batch } from "../../lib/proc.uc";
 
 let teardown = (length(ARGV) > 0 && ARGV[0] == "--teardown");
@@ -40,16 +27,29 @@ function writefile(path, text) {
 	let r = popen(sprintf("mv '%s.tmp' '%s'", path, path), "r"); if (r) r.close();
 }
 
+// INITD_DIR — env-override ТОЛЬКО для host-тестов (как SB_CONFIG): init-скрипты в sandbox — стабы.
+const INITD = getenv("INITD_DIR") ?? "/etc/init.d";
 function svc(action, name) {
-	let p = popen(sprintf("/etc/init.d/%s %s >/dev/null 2>&1", name, action), "r");
+	let p = popen(sprintf("%s/%s %s >/dev/null 2>&1", INITD, name, action), "r");
 	if (p) p.close();
 }
 
-// --arm: только поднять netifd-интерфейс поверх УЖЕ применённого (--no-arm) шага. Не читает
-// stdin, не трогает config.json/сервис — та же строка, что раньше шла безусловно в конце файла.
+// --arm: поднять netifd-интерфейс поверх УЖЕ применённого шага; stdin и config.json не трогает.
+// Half-routes живут на TUN, а TUN — на живом sing-box: мёртвый процесс (OOM, исчерпанный respawn)
+// `ifup` не оживит — сначала сервис. Так «arm» сторожа чинит и упавший sing-box, а не только маршрут.
 if (arm_only) {
+	if (trim(sh("pgrep sing-box >/dev/null 2>&1; echo $?")) != "0")
+		svc("restart", service_name({}));
 	sh(sprintf("ifup %s >/dev/null 2>&1", network_sections({})[0]));
 	printf("singbox: маршрут вооружён (%s)\n", network_sections({})[0]);
+	exit(0);
+}
+
+// --disarm: снять half-routes, не трогая конфиг и сервис (аварийный режим, install/pause.uc).
+// Зеркало --arm: там ifup, здесь ifdown — секции network остаются, вернуть можно одним --arm.
+if (length(ARGV) > 0 && ARGV[0] == "--disarm") {
+	sh(sprintf("ifdown %s >/dev/null 2>&1", network_sections({})[0]));
+	printf("singbox: маршрут снят (%s опущен, конфиг на месте)\n", network_sections({})[0]);
 	exit(0);
 }
 
@@ -80,29 +80,12 @@ if (!plan.ok) {
 	exit(1);
 }
 
-// ИНВАРИАНТ: перед стартом в main-таблице обязан быть WAN-дефолт мимо ОБОИХ туннелей (свой TUN
-// и awg0) — auto_detect_interface иначе не может дозвониться до сервера. Ждём с ретраями, а не
-// проверяем однократно: ifdown/ifup у netifd асинхронные. Подробно (инцидент): [[0004-multi-protocol-tiers]].
-const TUNNEL_IFS = [ "awg0" ];   // + свой TUN добавляем ниже: он известен из плана
-function wan_ready(tun) {
-	let skip = [ tun ];
-	for (let i = 0; i < length(TUNNEL_IFS); i++) push(skip, TUNNEL_IFS[i]);
-	return pick_wan_fallback(sh("ip -4 route show default 2>/dev/null"), skip) != null;
-}
-if (!dry) {
-	let ok_wan = false;
-	for (let i = 0; i < 10; i++) {
-		if (wan_ready(plan.tun)) { ok_wan = true; break; }
-		// Владелец WAN-маршрута — netifd; просим его переустановить, а не правим таблицу сами.
-		if (i == 0)
-			sh("ifup wan >/dev/null 2>&1");
-		sh("sleep 1");
-	}
-	if (!ok_wan) {
-		warn("singbox: в main-таблице нет маршрута по умолчанию мимо туннелей — sing-box не сможет дозвониться до сервера\n");
-		warn("singbox: проверьте WAN (uci show network.wan; ip route show default) — шаг не применён, туннель не тронут\n");
-		exit(1);
-	}
+// ИНВАРИАНТ: перед стартом в main обязан быть WAN-дефолт мимо ОБОИХ туннелей — иначе
+// auto_detect_interface не дозвонится до сервера (инцидент: [[0004-multi-protocol-tiers]]).
+if (!dry && !wait_wan_default()) {
+	warn("singbox: в main-таблице нет маршрута по умолчанию мимо туннелей — sing-box не сможет дозвониться до сервера\n");
+	warn("singbox: проверьте WAN (uci show network.wan; ip route show default) — шаг не применён, туннель не тронут\n");
+	exit(1);
 }
 
 let config_text = sprintf("%J\n", plan.config);

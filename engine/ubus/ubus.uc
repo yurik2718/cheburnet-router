@@ -1,10 +1,7 @@
-// ubus.uc — RPC-фасад движка: ЧИСТОЕ ядро валидации и роутинга входящих вызовов (реестр методов,
-// разбор аргументов, `list`/ACL). Импурная сторона (регистрация на шине, запуск CLI, poll) —
-// rpcd-cheburnet, проверяется в QEMU. Юниты здесь — engine/ubus/tests.
-//
-// ИНВАРИАНТ: вход из ubus RPC — граница доверия (как stdin пользователя), валидируем здесь;
-// внутренним границам движка доверяем (CLAUDE.md). REGISTRY — источник правды: из него выводятся
-// и дескриптор `list`, и rpcd-acl.json (тест сверяет файл с выводом отсюда).
+// ubus.uc — ЧИСТОЕ ядро RPC-фасада: реестр методов, валидация аргументов, `list`/ACL (тесты: tests/).
+// Импурная сторона — rpcd-cheburnet (QEMU).
+// ИНВАРИАНТ: вход из ubus RPC — граница доверия, валидируем здесь; внутренним границам доверяем.
+// REGISTRY — источник правды для дескриптора `list` и rpcd-acl.json (тест сверяет файл с ним).
 
 // Валидные id DNS-провайдеров — из каталога (единственный источник, enum не дрейфует с providers.uc).
 import { provider_ids } from "../steps/doh/providers.uc";
@@ -58,9 +55,14 @@ const REGISTRY = [
 	{ name: "set_mode",  access: "write", auth: "admin", token: false, args: [
 		{ name: "mode", type: "string", required: true, enum: [ "home", "travel" ] },
 	] },
-	{ name: "update_list", access: "write", auth: "admin", token: false, args: [
-		{ name: "url", type: "string" },
-	] },
+	// Аварийный режим: выключить защиту и пустить интернет напрямую — и вернуть обратно.
+	// Без него у неспециалиста при мёртвом туннеле оставались ровно два выхода: SSH или
+	// factory_reset (снести настройку целиком). Аргументов нет: обе операции обратимы одна
+	// другой, а решение фиксируется флагом paused в install.json и видно в status.
+	{ name: "pause_protection",  access: "write", auth: "admin", token: false, args: [] },
+	{ name: "resume_protection", access: "write", auth: "admin", token: false, args: [] },
+	// Источник community-списка — решение проекта (list/list.uc DEFAULT_SOURCE), не настройка.
+	{ name: "update_list", access: "write", auth: "admin", token: false, args: [] },
 	{ name: "service_restart", access: "write", auth: "admin", token: false, args: [
 		// сервисы data-plane (без podkop/sing-box; adblock убран — фильтрация через DNS)
 		{ name: "service", type: "string", required: true, enum: [ "vpn", "dns", "doh" ] },
@@ -115,11 +117,6 @@ function find_spec(method) {
 		if (REGISTRY[i].name == method)
 			return REGISTRY[i];
 	return null;
-}
-
-// method_specs() — копия реестра (для UI/отладки; источник правды — здесь).
-function method_specs() {
-	return json(sprintf("%J", REGISTRY)); // глубокая копия через JSON-раунд-трип
 }
 
 // Плейсхолдер-значение для типа в дескрипторе `list` (rpcd берёт ТИП образца, не значение).
@@ -248,4 +245,4 @@ function make_error(msg, extra) {
 	return o;
 }
 
-export { method_specs, list_descriptor, validate_request, requires_token, acl_split, build_acl, make_error };
+export { list_descriptor, validate_request, requires_token, acl_split, build_acl, make_error };

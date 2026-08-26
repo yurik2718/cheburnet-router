@@ -33,12 +33,15 @@ function shq(s) {
 }
 
 // rpc(method, args, opts) → распарсенный JSON-ответ фасада (null, если ответ не JSON).
-// opts.with_singbox — подсунуть стаб sing-box через PATH-префикс (гейты Full-тира).
+// opts.with_singbox — подсунуть стаб sing-box через PATH-префикс (гейты Full-тира);
+// opts.engine — ENGINE_DIR с заглушками длинных операций (какой CLI фасад зовёт и с чем).
 function rpc(method, args, opts) {
 	opts = opts ?? {};
 	let env = sprintf("STATE_DIR=%s ETC_CHEBURNET=%s", STATE, ETC);
 	if (opts.with_singbox)
 		env = sprintf("PATH=%s:$PATH %s", BIN, env);
+	if (opts.engine)
+		env = sprintf("ENGINE_DIR=%s %s", shq(opts.engine), env);
 	let cmd = sprintf("printf '%%s' %s | %s ucode -R %s call %s 2>/dev/null",
 		shq(sprintf("%J", args ?? {})), env, RPCD, method);
 	let out = sh(cmd);
@@ -432,10 +435,59 @@ test("status: forced доезжает до панели; свежая систе
 test("set_mode: forced переживает перезапись install.json (save_cfg его не теряет)", () => {
 	reset_sb();
 	put_cfg({ protocol: "awg", routing_opts: { mode: "home" }, forced: [ "ram" ] });
-	rpc("set_mode", { mode: "travel" }); // применение firewall на хосте провалится — важен cfg
+	rpc("set_mode", { mode: "travel" }); // применение на хосте провалится — важен cfg
 	let cfg = json(readfile(ETC + "/install.json"));
 	eq(length(cfg.forced ?? []), 1, "отметка на месте после смены режима");
 	eq(cfg.forced[0], "ram");
+});
+
+// === set_mode: единая реализация переприменения ===
+// ШРАМ: у set_mode была своя копия «переприменить firewall» без tunnel_if — на Full-тире она
+// пересобирала NAT-зону под awg0. Теперь firewall идёт ТОЛЬКО через install/reapply.uc.
+
+// stub_engine(rc) → каталог-«движок»: reapply.uc фиксирует вызов и выходит с rc, dns-шаг пишет payload.
+function stub_engine(rc) {
+	let dir = SB + "/engine";
+	sh(sprintf("rm -rf %s; mkdir -p %s/install %s/steps/dns", shq(dir), shq(dir), shq(dir)));
+	writefile(dir + "/install/reapply.uc",
+		sprintf("import { writefile, readfile } from \"fs\";\nwritefile(%s, readfile(%s) ?? \"\");\nexit(%d);\n",
+			shq(SB + "/reapply-seen.json"), shq(ETC + "/install.json"), rc));
+	writefile(dir + "/steps/dns/apply.uc",
+		sprintf("import { stdin, writefile } from \"fs\";\nwritefile(%s, stdin.read(\"all\") ?? \"\");\n",
+			shq(SB + "/dns-payload.json")));
+	return dir;
+}
+
+test("set_mode на Full-тире: firewall — через install/reapply.uc, режим сохранён ДО него", () => {
+	reset_sb();
+	sh(sprintf("rm -f %s/reapply-seen.json %s/dns-payload.json", shq(SB), shq(SB)));
+	put_cfg({ protocol: "reality", routing_opts: { mode: "home", wan_if: "eth0", tunnel_if: "singtun0" },
+	          domains: [ "example.com" ] });
+	let r = rpc("set_mode", { mode: "travel" }, { engine: stub_engine(0) });
+	eq(r.status, "ok", sprintf("ответ: %J", r));
+	let seen = json(readfile(SB + "/reapply-seen.json"));
+	eq(seen.routing_opts.mode, "travel", "reapply.uc читает режим из install.json — он уже новый");
+	eq(seen.routing_opts.tunnel_if, "singtun0", "tunnel_if Full-тира не потерян");
+	let dns = json(readfile(SB + "/dns-payload.json"));
+	eq(dns.routing_opts.mode, "travel", "DNS-шаг получил тот же режим");
+	eq(json(readfile(ETC + "/install.json")).routing_opts.mode, "travel");
+});
+
+test("set_mode: WAN не найден (reapply.uc → 2) → честная ошибка, прежний режим возвращён", () => {
+	reset_sb();
+	put_cfg({ protocol: "awg", routing_opts: { mode: "home", wan_if: "eth0" } });
+	let r = rpc("set_mode", { mode: "travel" }, { engine: stub_engine(2) });
+	err_has(r, "WAN не найден", "set_mode");
+	eq(json(readfile(ETC + "/install.json")).routing_opts.mode, "home",
+		"install.json отражает ПРИМЕНЁННОЕ состояние, а не желаемое");
+});
+
+test("set_mode на ненастроенном роутере → ошибка, ничего не применяется", () => {
+	reset_sb();
+	sh(sprintf("rm -f %s/reapply-seen.json", shq(SB)));
+	let r = rpc("set_mode", { mode: "travel" }, { engine: stub_engine(0) });
+	err_has(r, "не настроен", "set_mode");
+	ok(!access(SB + "/reapply-seen.json"), "reapply.uc не вызывался");
 });
 
 // === check_lan_conflict: на хосте фактов нет → честное «проверять нечего» ===

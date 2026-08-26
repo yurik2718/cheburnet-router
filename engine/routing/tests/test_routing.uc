@@ -131,4 +131,25 @@ test("render_all: композиция всех артефактов + passthrou
 	eq(length(all.rejected), 1, "невалидный домен отражён в rejected (видимость для UI)");
 });
 
+// --- резервный DNS: правило по владельцу сокета (см. ИНВАРИАНТ в render_iprules) ---
+test("render_iprules: dns_uid → правило uidrange в ту же таблицу 100", () => {
+	let plan = build_plan([], { wan_if: "eth0", wan_gw: "192.0.2.1", dns_uid: 101 });
+	let out = join("\n", render_iprules(plan));
+	ok(index(out, "ip rule add uidrange 101-101 lookup 100") >= 0,
+		"резервный DoH-экземпляр уходит мимо туннеля тем же путём, что direct-трафик");
+	ok(index(out, "ip -6 rule add uidrange 101-101 lookup 100") >= 0, "и для v6");
+});
+
+test("render_iprules: без dns_uid правила нет (чужая сборка без такого пользователя)", () => {
+	let out = join("\n", render_iprules(build_plan([], { wan_if: "eth0" })));
+	ok(index(out, "uidrange") < 0, "нет пользователя — нет правила, поведение как раньше");
+});
+
+// В поездке мимо туннеля не уходит НИЧЕГО, включая резервный DNS: в чужом Wi-Fi лучше остаться
+// без резолва, чем засветить домены (fail-closed).
+test("render_iprules: travel → резервного DNS тоже нет", () => {
+	let out = join("\n", render_iprules(build_plan([], { mode: "travel", wan_if: "eth0", dns_uid: 101 })));
+	eq(out, "", "в travel policy-routing пуст целиком");
+});
+
 exit(summary());

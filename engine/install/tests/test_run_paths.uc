@@ -9,8 +9,8 @@
 // Живой data-plane (netifd/fw4) — по-прежнему QEMU; здесь — логика переходов на реальном коде.
 
 import { test, eq, ok, deep_eq, summary } from "../../lib/assert.uc";
-import { writefile, readfile, access } from "fs";
-import { mk_sandbox, with_singbox, run_uc, calls, cleanup } from "./harness.uc";
+import { writefile, readfile, access, mkdir } from "fs";
+import { mk_sandbox, with_singbox, run_uc, calls, cleanup, write_stub, shq } from "./harness.uc";
 
 // seed_cfg(sb, extra) — install.json «до этой попытки» (то, что пишет m_install до исхода).
 function seed_cfg(sb, name, obj) {
@@ -255,20 +255,36 @@ const AWG_CONF =
 	"Endpoint = vpn.example.com:51820\n";
 const REALITY_CONF = "vless://uuid-x@203.0.113.9:443?security=reality&pbk=YQ&sni=example.com";
 
-test("vpn/apply.uc --no-arm: route_allowed_ips='0' в calls, интерфейс всё равно поднимается", () => {
+test("vpn/apply.uc --no-arm: half-routes НЕ создаются, интерфейс всё равно поднимается", () => {
 	let sb = mk_sandbox();
 	let r = run_uc(sb, "steps/vpn/apply.uc", "--no-arm", AWG_CONF);
 	eq(r.rc, 0, "exit 0: " + r.out);
-	ok(index(calls(sb), "route_allowed_ips='0'") >= 0, "маршрут НЕ вооружён");
-	ok(index(calls(sb), "route_allowed_ips='1'") < 0, "старое значение не просочилось");
+	ok(index(calls(sb), "awg0_route4lo=route") < 0, "маршрут НЕ вооружён");
+	ok(index(calls(sb), "route_allowed_ips='0'") >= 0, "но proto-handler свой default тоже не ставит");
+	ok(index(calls(sb), "route_allowed_ips='1'") < 0, "старая схема не просочилась");
 	cleanup(sb);
 });
 
-test("vpn/apply.uc --arm: только route_allowed_ips='1' + reload, конфиг не трогает", () => {
+test("vpn/apply.uc --arm: half-routes + reload, конфиг туннеля не трогает", () => {
 	let sb = mk_sandbox();
 	let r = run_uc(sb, "steps/vpn/apply.uc", "--arm");
 	eq(r.rc, 0, "exit 0: " + r.out);
-	ok(index(calls(sb), "route_allowed_ips='1'") >= 0, "маршрут довооружён");
+	ok(index(calls(sb), "awg0_route4lo.target='0.0.0.0/1'") >= 0, "маршрут довооружён");
+	// netifd применяет route-секции по reload — перезапускать туннель сразу после health-check
+	// не за что (обе ветки прогнаны в qemu-route-fallback).
+	ok(index(calls(sb), "ifup awg0") < 0, "туннель не дёргаем: reload ставит маршруты сам");
+	ok(index(calls(sb), "private_key") < 0, "конфиг туннеля не переписывается");
+	cleanup(sb);
+});
+
+// --arm — он же путь миграции со старой схемы: route_allowed_ips='1' обязан быть перебит, иначе
+// netifd оставит свой ЗАМЕЩАЮЩИЙ default и подъём WAN снова отберёт маршрут у туннеля.
+test("vpn/apply.uc --arm: перебивает route_allowed_ips на '0' (миграция старой установки)", () => {
+	let sb = mk_sandbox();
+	run_uc(sb, "steps/vpn/apply.uc", "--arm");
+	ok(index(calls(sb), "route_allowed_ips='0'") >= 0, "старая схема снята");
+	// WAN-дефолт в песочнице есть (route_default.out) → гасить и поднимать wan не за чем.
+	ok(index(calls(sb), "ifup wan") < 0, "живой WAN не дёргаем на ровном месте");
 	cleanup(sb);
 });
 
@@ -281,11 +297,28 @@ test("singbox/apply.uc --no-arm: ifup НЕ вызывается", () => {
 	cleanup(sb);
 });
 
-test("singbox/apply.uc --arm: ifup singtun и только он", () => {
+test("singbox/apply.uc --arm при живом sing-box: ifup singtun, сервис не трогаем", () => {
 	let sb = mk_sandbox();
-	let r = run_uc(sb, "steps/singbox/apply.uc", "--arm");
+	writefile(sb.fake + "/pgrep.rc", "0\n"); // sing-box жив
+	mkdir(sb.root + "/initd", 0o755); write_stub(sb.root + "/initd", "sing-box", "exit 0");
+	let r = run_uc(sb, "steps/singbox/apply.uc", "--arm", null, sprintf("INITD_DIR=%s", shq(sb.root + "/initd")));
 	eq(r.rc, 0, "exit 0: " + r.out);
 	ok(index(calls(sb), "ifup singtun") >= 0, "маршрут довооружён");
+	ok(index(calls(sb), "sing-box restart") < 0, "живой туннель не мигаем ровно тогда, когда health его подтвердил");
+	cleanup(sb);
+});
+
+// Half-routes живут на TUN, а TUN — на живом sing-box: после OOM/исчерпанного respawn «arm» сторожа
+// делал `ifup` в пустоту три раза и замолкал — дом без интернета до SSH.
+test("singbox/apply.uc --arm при МЁРТВОМ sing-box: сначала рестарт сервиса, потом ifup", () => {
+	let sb = mk_sandbox();
+	// pgrep.rc по умолчанию 1 → процесса нет
+	mkdir(sb.root + "/initd", 0o755); write_stub(sb.root + "/initd", "sing-box", "exit 0");
+	let r = run_uc(sb, "steps/singbox/apply.uc", "--arm", null, sprintf("INITD_DIR=%s", shq(sb.root + "/initd")));
+	eq(r.rc, 0, "exit 0: " + r.out);
+	let c = calls(sb);
+	ok(index(c, "sing-box restart") >= 0, "сервис поднят");
+	ok(index(c, "sing-box restart") < index(c, "ifup singtun"), "рестарт ДО ifup: netifd ставит маршрут на живой TUN");
 	cleanup(sb);
 });
 
@@ -299,10 +332,30 @@ test("первая установка (AWG), health провалился → hal
 	let r = run_uc(sb, "install/run.uc", null, payload);
 	eq(r.rc, 1, "exit 1: " + r.out);
 	eq(trim(readfile(sb.reason) ?? ""), "health:tunnel:fetch");
-	ok(index(calls(sb), "route_allowed_ips='1'") < 0,
+	ok(index(calls(sb), "awg0_route4lo=route") < 0,
 		"дом НЕ переключался на непроверенный туннель — раньше здесь была утечка/потеря интернета");
-	ok(index(calls(sb), "route_allowed_ips='0'") >= 0, "но интерфейс поднимался (--no-arm) — health-check мог его проверить");
+	ok(index(calls(sb), "amneziawg_awg0") >= 0, "но интерфейс поднимался (--no-arm) — health-check мог его проверить");
 	cleanup(sb);
+});
+
+// Сторож — единственное, что смотрит за роутером ПОСЛЕ установки. Не поставился на успешном
+// пути — обещание «работает годами» опирается только на удачу.
+test("успешная установка ставит сторожа в cron; провал — не ставит", () => {
+	let sb = mk_sandbox();
+	writefile(sb.fake + "/awg.out", "pubkeyXXX\t5\n"); // свежее рукопожатие → health ok
+	seed_cfg(sb, "install.json", { routing_opts: {} });
+	let payload = sprintf("%J", { protocol: "awg", awg_conf: AWG_CONF,
+		disable: [ "dns", "doh", "wifi", "firewall" ], domains: [], routing_opts: {} });
+	eq(run_uc(sb, "install/run.uc", null, payload).rc, 0);
+	ok(index(readfile(sb.crontab) ?? "", "watchdog/tick.uc") >= 0, "cron-запись на месте");
+	cleanup(sb);
+
+	let sb2 = mk_sandbox(); // awg.out пуст → health не пройдёт → откат
+	seed_cfg(sb2, "install.json", { routing_opts: {} });
+	eq(run_uc(sb2, "install/run.uc", null, payload).rc, 1);
+	ok(index(readfile(sb2.crontab) ?? "", "watchdog/tick.uc") < 0,
+		"на откате сторожить нечего — запись не ставим");
+	cleanup(sb2);
 });
 
 test("первая установка (AWG), health прошёл → half-routes вооружены (arm вызван)", () => {
@@ -313,7 +366,7 @@ test("первая установка (AWG), health прошёл → half-routes
 		disable: [ "dns", "doh", "wifi", "firewall" ], domains: [], routing_opts: {} });
 	let r = run_uc(sb, "install/run.uc", null, payload);
 	eq(r.rc, 0, "exit 0: " + r.out);
-	ok(index(calls(sb), "route_allowed_ips='1'") >= 0, "туннель подтверждён — теперь вооружён");
+	ok(index(calls(sb), "awg0_route4lo=route") >= 0, "туннель подтверждён — теперь вооружён");
 	cleanup(sb);
 });
 

@@ -109,6 +109,13 @@ define Package/cheburnet/postinst
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
 /etc/init.d/rpcd reload 2>/dev/null
 
+# Обновление ПОВЕРХ настроенного роутера: переприменить data-plane новым движком сразу, не ждать
+# ребута — миграции (схема маршрута туннеля, cron-запись сторожа) живут в install/reapply.uc, а
+# hotplug-хук зовёт его только когда что-то не сходится. До ребута роутер иначе жил бы на старой схеме.
+if [ -f /etc/cheburnet/install.json ]; then
+	ucode -R /usr/share/cheburnet/engine/install/reapply.uc >/dev/null 2>&1 || true
+fi
+
 # Самодостаточность установки: пакет мог встать НЕ через bootstrap (LuCI «Software», ручной
 # apk add) — тогда токена мастера нет и мастер не запустить. Засеваем токен и печатаем ссылку в
 # системный лог (виден в LuCI → Status → System Log), чтобы браузерная установка без SSH доходила

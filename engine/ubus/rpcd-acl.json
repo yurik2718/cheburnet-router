@@ -41,6 +41,8 @@
                     "install",
                     "install_cancel",
                     "set_mode",
+                    "pause_protection",
+                    "resume_protection",
                     "update_list",
                     "service_restart",
                     "set_dns_provider",

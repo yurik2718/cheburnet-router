@@ -2,7 +2,8 @@
 //   ucode -R engine/steps/doh/tests/test_providers.uc
 
 import { test, eq, ok, deep_eq, summary } from "../../../lib/assert.uc";
-import { default_provider, provider_ids, resolvers_for, describe, catalog_for_ui } from "../providers.uc";
+import { default_provider, provider_ids, resolvers_for, wan_user, describe,
+         catalog_for_ui } from "../providers.uc";
 
 test("default_provider — валидный id из каталога", () => {
 	let ids = provider_ids();
@@ -15,13 +16,29 @@ test("provider_ids — ожидаемый набор", () => {
 		[ "adguard", "adguard-family", "cleanbrowsing-family", "quad9", "cloudflare" ]);
 });
 
-test("resolvers_for — одна секция cheburnet_doh:5053 с url+bootstrap провайдера", () => {
+test("resolvers_for — ДВА экземпляра: основной 5053 и резервный 5054, оба одного провайдера", () => {
 	let r = resolvers_for("adguard-family");
-	eq(length(r), 1, "один резолвер на провайдера");
-	eq(r[0].name, "cheburnet_doh", "фиксированное имя секции → чистая замена");
+	eq(length(r), 2, "основной (через туннель) + резервный (через WAN)");
+	eq(r[0].name, "cheburnet_doh", "фиксированные имена секций → чистая замена");
 	eq(r[0].port, 5053);
+	eq(r[1].name, "cheburnet_doh_wan");
+	eq(r[1].port, 5054);
+	// Один провайдер на оба — иначе фильтрация молча менялась бы при переключении на резервный
+	// (семейный фильтр не должен расфильтроваться в аварии).
 	eq(r[0].url, "https://family.adguard-dns.com/dns-query");
+	eq(r[1].url, r[0].url, "резервный — ТОТ ЖЕ провайдер и тот же уровень фильтрации");
+	eq(r[1].bootstrap, r[0].bootstrap);
 	ok(index(r[0].bootstrap, ",") >= 0, "два anycast-эндпоинта (redundancy в классе)");
+});
+
+// Единственное отличие резервного экземпляра — владелец сокетов: по нему policy-routing
+// (steps/firewall, `ip rule uidrange`) уводит его мимо туннеля.
+test("resolvers_for — резервный экземпляр под ОТДЕЛЬНЫМ пользователем", () => {
+	let r = resolvers_for("adguard");
+	eq(r[0].user, "nobody", "основной — обычный nobody");
+	eq(r[1].user, wan_user(), "резервный — пользователь из wan_user()");
+	ok(r[1].user != r[0].user, "разные пользователи, иначе правило по uid не различит их");
+	ok(r[1].via_wan === true, "резервный помечен как идущий мимо туннеля");
 });
 
 test("resolvers_for — неизвестный id → дефолт (fail-safe, рабочий DNS)", () => {

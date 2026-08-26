@@ -36,6 +36,14 @@ let raw_cfg = readfile(CFG_FILE);
 if (raw_cfg != null) {
 	try { cfg = json(raw_cfg) ?? {}; } catch (e) { cfg = {}; }
 }
+// Инварианты собираем тем же CLI, что зовут тесты и (в будущем) watchdog — одна реализация
+// на всех потребителей. Ошибка сборки не должна валить весь пакет: диагностика нужна ИМЕННО
+// когда что-то сломано, поэтому берём что вышло.
+let ENGINE_DIR = getenv("ENGINE_DIR") ?? (sourcepath(0, true) + "/..");
+let invariants = trim(sh(sprintf(
+	"ucode -R %s/invariants/gather.uc 2>/dev/null | ucode -R %s/invariants/check.uc 2>&1",
+	ENGINE_DIR, ENGINE_DIR)));
+
 let protocol = cfg.protocol ?? "awg";
 let tun_if = tunnel_info(protocol).tunnel_if;
 
@@ -93,6 +101,9 @@ let cfg_lines = [
 ];
 
 let body =
+	// Чек-лист инвариантов ПЕРВЫМ: разбор жалобы начинается с «что не на месте», а не с чтения
+	// сырых дампов. Провал строкой прямо говорит, чем чинится (engine/invariants).
+	section("что на месте (инварианты data-plane)", invariants) +
 	section("роутер и версии", env) +
 	section("конфигурация (без секретов)", join("\n", cfg_lines)) +
 	section("состояние сети и сервисов", state) +

@@ -64,11 +64,12 @@ function uses_singbox(protocol) {
 	return tunnel_info(protocol).step == SINGBOX_STEP;
 }
 
-// singbox_protocols() → протоколы Full-тира (для UI/гейтов: что предлагать на подходящем железе).
-function singbox_protocols() {
+// tunnel_ifs() → интерфейсы ВСЕХ туннелей (awg0, singtun0). Единственный источник для тех, кто
+// ищет WAN «мимо туннелей» (lib/wan.uc) — хардкод чужого туннеля в шаге разъезжался бы молча.
+function tunnel_ifs() {
 	let out = [];
 	for (let k in PROTOCOLS)
-		if (PROTOCOLS[k].step == SINGBOX_STEP) push(out, k);
+		if (index(out, PROTOCOLS[k].tunnel_if) < 0) push(out, PROTOCOLS[k].tunnel_if);
 	return out;
 }
 
@@ -94,13 +95,6 @@ function tunnel_conf(protocol, cfg) {
 	let key = tunnel_info(protocol).conf_key;
 	let v = (cfg ?? {})[key];
 	return (type(v) == "string") ? v : "";
-}
-
-// all_steps() → копия реестра (в порядке применения).
-function all_steps() {
-	let out = [];
-	for (let i = 0; i < length(STEPS); i++) push(out, copy_step(STEPS[i]));
-	return out;
 }
 
 // enabled_steps(opts) → шаги к применению. opts.disable — список имён, которые пропустить.
@@ -139,15 +133,10 @@ function dirty_steps(steps) {
 
 // decide_outcome(results) → { action, code, reason, failed }. action ∈ abort | rollback | commit.
 //   results = { preflight:{ok}, steps:[{name,ok}...], health:{ok, dns_ok?, tun_ok?, tun_reason?}|null }
-// ИНВАРИАНТ (fail-safe): нет preflight → abort (ничего не трогали); упал шаг или health →
-// rollback; всё ок → commit. code — машинный код исхода для адресной диагностики в UI
-// (web/src/lib/logic.js: explainFail). health раскладывается на code, только если health
-// принёс dns_ok/tun_ok (run.uc.healthcheck) — иначе (старый/минимальный health-объект) остаётся
-// общий "health", это НЕ регресс: DNS и туннель — РАЗНЫЕ поломки с разным «что делать», а
-// туннель-причина (tun_reason: process/route/fetch) — приоритетнее DNS, если оба не встали
-// (мёртвый туннель обычно и есть причина, почему DNS через него тоже не резолвится). У AWG
-// (в отличие от Full-тира) стадий отказа нет — только «рукопожатия нет», tun_reason всегда null,
-// и дефолт "fetch" сознательно переиспользует текст «сервер не ответил» — он и для AWG верен.
+// ИНВАРИАНТ (fail-safe): нет preflight → abort; упал шаг или health → rollback; всё ок → commit.
+// code — машинный код для UI (logic.js explainFail): туннель-причина (process/route/fetch)
+// приоритетнее DNS — мёртвый туннель обычно и есть причина, почему DNS через него не резолвится;
+// у AWG стадий нет (tun_reason null) и дефолт "fetch" = «сервер не ответил» верен и для него.
 function decide_outcome(results) {
 	if (!results || !results.preflight || results.preflight.ok !== true)
 		return { action: "abort", code: "preflight", reason: "preflight не пройден — изменений нет", failed: [] };
@@ -239,7 +228,7 @@ function route_uses_iface(route_out, iface) {
 	return false;
 }
 
-export { protocol_ids, default_protocol, tunnel_info, uses_singbox, singbox_protocols, tunnel_conf,
-         disabled_tunnels, all_steps, enabled_steps, snapshot_scope, dirty_steps, decide_outcome,
+export { protocol_ids, default_protocol, tunnel_info, tunnel_ifs, uses_singbox, tunnel_conf,
+         disabled_tunnels, enabled_steps, snapshot_scope, dirty_steps, decide_outcome,
          handshake_state, fresh_handshake, tunnel_health, HANDSHAKE_FRESH_S,
          route_uses_iface };

@@ -21,6 +21,10 @@ let raw = readfile(ETC_CHEBURNET + "/install.json");
 let cfg = (raw && substr(trim(raw), 0, 1) == "{") ? json(raw) : {};
 let ro = (type(cfg.routing_opts) == "object") ? cfg.routing_opts : {};
 
+// Сторожа снимаем ПЕРВЫМ: тик посреди сброса начал бы «чинить» ровно то, что мы разбираем.
+print("reset: снимаю сторожа (cron)\n");
+sh(sprintf("ucode -R %s/watchdog/cron.uc --remove >/dev/null 2>&1", ENGINE));
+
 print("reset: снимаю data-plane (nft/ip/NAT-зона)\n");
 run_stdin(sprintf("ucode -R %s/steps/firewall/apply.uc --teardown", ENGINE),
 	sprintf("%J", { domains: [], routing_opts: ro }));
@@ -52,6 +56,9 @@ for (let i = 0; i < length(stoks); i++)
 	if (substr(stoks[i], 0, length(pfx)) == pfx)
 		push(ops, sprintf("del_list dhcp.@dnsmasq[0].server='%s'", stoks[i]));
 push(ops, "delete dhcp.@dnsmasq[0].noresolv");
+// strictorder ставил doh-шаг (порядок upstream'ов значим только с нашими двумя экземплярами) —
+// снимаем вместе с ними, иначе чужой upstream пользователя останется под нашей политикой.
+push(ops, "delete dhcp.@dnsmasq[0].strictorder");
 uci_batch(ops, "dhcp");
 
 // https-dns-proxy: стоп + снести все секции (наш шаг и так владел конфигом целиком).
@@ -83,9 +90,8 @@ rmdir(ETC_CHEBURNET);
 // Install-токен здесь НЕ выпускаем: это отдельный ubus-метод install_token, зовётся владельцем
 // по запросу, а не автоматически при сбросе.
 
-// Шрам: RESTART, не reload — awg0 был дефолтным маршрутом (route_allowed_ips=1), reload не
-// возвращает WAN-дефолт после его удаления, и роутер оставался без интернета. Тот же урок, что
-// в install/run.uc rollback_all.
+// RESTART, не reload: сброс снимает интерфейсы обоих тиров, и netifd после reload не всегда
+// возвращает маршруты снятого (шрам старой схемы маршрута — см. HALF_ROUTES в steps/vpn/vpn.uc).
 sh("/etc/init.d/network restart >/dev/null 2>&1");
 sh("/etc/init.d/dnsmasq restart >/dev/null 2>&1");
 

@@ -12,16 +12,17 @@
 // preflight, list, steps. Проверяется в QEMU (живой ubus/uci), не юнитами.
 
 import { stdin, readfile, writefile, unlink, access, chmod, mkdir } from "fs";
-import { sh, run_stdin } from "../lib/proc.uc";
+import { sh, run_stdin, shellquote } from "../lib/proc.uc";
 import { list_descriptor, validate_request, requires_token, make_error } from "./ubus.uc";
 import { cidr_overlap, suggest_lan, valid_lan_ip, full_hw_missing } from "../preflight/preflight.uc";
-import { parse_wan_route } from "../preflight/parse.uc";
 import { default_provider, describe, catalog_for_ui } from "../steps/doh/providers.uc";
 import { owned_sections as dns_owned_sections } from "../steps/dns/dns.uc";
 import { default_protocol, tunnel_info, tunnel_health, uses_singbox } from "../install/install.uc";
+import { restart_tunnel_cmd } from "../watchdog/watchdog.uc";
 
 // engine/ — относительно этого файла (engine/ubus/rpcd-cheburnet). Тот же приём, что в run.uc.
-const ENGINE = sourcepath(0, true) + "/..";
+// ENGINE_DIR — override ТОЛЬКО для host-тестов: длинные операции подменяются заглушками.
+const ENGINE = getenv("ENGINE_DIR") ?? (sourcepath(0, true) + "/..");
 
 // Пути роутера. env-override — чтобы integration-тесты гоняли скрипт в sandbox без реальных
 // /etc и /tmp (тот же приём, что в v1).
@@ -37,11 +38,6 @@ const REASON_FILE   = STATE_DIR + "/reason"; // машинный код исхо
 const PID_FILE      = STATE_DIR + "/pid";
 
 // === I/O-хелперы === (sh/run_stdin — общие, см. lib/proc.uc)
-
-// shellquote(s) — одинарные кавычки для безопасной передачи JSON в `printf '%s'`.
-function shellquote(s) {
-	return "'" + replace(s ?? "", "'", "'\\''") + "'";
-}
 
 // respond(obj) — напечатать JSON-ответ RPC и выйти 0 (rpcd ждёт один JSON-объект в stdout).
 function respond(obj) {
@@ -74,6 +70,7 @@ function load_cfg() {
 	if (type(c.dns_provider) != "string") c.dns_provider = default_provider();
 	if (type(c.protocol) != "string") c.protocol = default_protocol();
 	if (type(c.forced) != "array") c.forced = [];
+	if (type(c.paused) != "bool") c.paused = false;
 	return c;
 }
 
@@ -85,6 +82,10 @@ function save_cfg(c) {
 		// forced ОБЯЗАН переживать перезапись cfg (смена режима/списка/провайдера): иначе отметка
 		// «поставлено с пропуском проверок железа» тихо исчезала бы после первого же set_mode.
 		forced: (type(c.forced) == "array") ? c.forced : [],
+		// paused ОБЯЗАН пережить перезапись cfg (смена режима/списка/провайдера): иначе первый же
+		// set_mode стёр бы аварийный режим, reapply вернул бы защиту — и человек снова остался бы
+		// без интернета, ничего для этого не сделав.
+		paused: (c.paused === true),
 	}));
 }
 
@@ -111,11 +112,12 @@ function assemble_domains(user) {
 	return (type(r.domains) == "array") ? r.domains : [];
 }
 
-// reapply_dns(cfg) / reapply_firewall(cfg) — переприменить mode-зависимые шаги их же apply.uc
-// (идемпотентно). Вход — {domains, routing_opts}.
-function reapply_step(name, cfg) {
+// reapply_dns(cfg) — переприменить DNS-шаг его же apply.uc (идемпотентно). Firewall так НЕ
+// переприменяем: у него есть единственная реализация install/reapply.uc (свежий WAN, tunnel_if по
+// протоколу) — собственная копия здесь однажды пересобрала NAT-зону Full-тира под awg0.
+function reapply_dns(cfg) {
 	let payload = sprintf("%J", { domains: cfg.domains, routing_opts: cfg.routing_opts });
-	return run_stdin(engine_cli(sprintf("steps/%s/apply.uc", name)), payload);
+	return run_stdin(engine_cli("steps/dns/apply.uc"), payload);
 }
 
 // Человеческое имя протокола для сообщений об ошибках (панель показывает их как есть).
@@ -309,6 +311,8 @@ function m_status() {
 
 	respond({
 		installed: installed,
+		// Аварийный режим: панель обязана сказать прямо, что защита сейчас снята (см. pause.uc).
+		paused: (cfg.paused === true),
 		installing: (facts.alive ?? "") == "1",
 		mode: mode,
 		protocol: cfg.protocol, // активный туннель (awg|reality) — UI показывает и предлагает замену
@@ -431,31 +435,26 @@ function m_install_progress() {
 function m_set_mode(v) {
 	if (pid_alive())
 		respond(make_error("операция уже выполняется"));
+	if (!access(CFG_FILE))
+		respond(make_error("роутер не настроен — режим не к чему применять"));
 	let cfg = load_cfg();
+	let prev = cfg.routing_opts.mode ?? "home";
 	cfg.routing_opts.mode = v.mode;
 
-	// wan_if персистит run.uc на commit-пути установки; для систем, установленных до этого фикса,
-	// повторяем первичный детект (netifd знает WAN, даже когда kernel-default у туннеля). Без
-	// wan_if firewall-план честно откажет: kill-switch не хардкодим (урок v1).
-	if (!cfg.routing_opts.wan_if) {
-		let wr = parse_wan_route(sh("ubus call network.interface.wan status 2>/dev/null"));
-		if (wr) {
-			cfg.routing_opts.wan_if = wr.wan_if;
-			if (wr.wan_gw) cfg.routing_opts.wan_gw = wr.wan_gw;
-		}
-	}
-
-	// Mode-зависимы только firewall (kill-switch строже + ip rule) и DNS (в travel nftset пуст).
-	// VPN/DoH от режима не зависят — не трогаем. Идемпотентно: повтор того же режима = no-op.
-	// Порядок: сначала firewall — откажет он (обычно нет WAN) → система не тронута вовсе; dns
-	// после него в любом исходе fail-safe (пустой/полный nftset → лишнее едет в туннель).
-	// Режим сохраняем ПОСЛЕ успеха обоих шагов: install.json отражает ПРИМЕНЁННОЕ состояние
-	// (раньше провал применения оставлял в status режим, которого на роутере нет).
-	let rc_fw  = reapply_step("firewall", cfg);
-	let rc_dns = (rc_fw == 0) ? reapply_step("dns", cfg) : -1;
-	if (rc_fw != 0 || rc_dns != 0)
-		respond(make_error(sprintf("не удалось применить режим %s", v.mode), { firewall: rc_fw, dns: rc_dns }));
+	// Mode-зависимы только firewall (kill-switch строже + ip rule) и DNS (в travel nftset пуст);
+	// VPN/DoH не трогаем. Firewall читает режим из install.json, поэтому сохраняем ДО reapply и
+	// возвращаем прежний при провале: install.json обязан отражать ПРИМЕНЁННОЕ состояние.
+	// Порядок: сначала firewall (откажет он — система не тронута), dns после него fail-safe.
 	save_cfg(cfg);
+	let rc_fw  = int(trim(sh(engine_cli("install/reapply.uc") + " >/dev/null 2>&1; echo $?")));
+	let rc_dns = (rc_fw == 0) ? reapply_dns(cfg) : -1;
+	if (rc_fw != 0 || rc_dns != 0) {
+		cfg.routing_opts.mode = prev;
+		save_cfg(cfg);
+		respond(make_error(rc_fw == 2 ? "WAN не найден — режим не применён, проверьте подключение к провайдеру"
+		                             : sprintf("не удалось применить режим %s", v.mode),
+			{ firewall: rc_fw, dns: rc_dns }));
+	}
 	respond({ status: "ok", mode: v.mode });
 }
 
@@ -464,11 +463,9 @@ function m_update_list(v) {
 		respond(make_error("операция уже выполняется"));
 
 	// Подтянуть свежий community-список (fetch.uc сам гейтит мусор и атомарно меняет кэш;
-	// при сбое кэш не тронут → остаётся старый рабочий список). url необязателен — дефолтный
-	// источник задаёт DEFAULT_SOURCE в list/list.uc (там же — проверка его семантики).
-	let url = v.url ?? "";
-	let fetch = engine_cli("list/fetch.uc") + (length(url) ? " " + shellquote(url) : "");
-	let rc = int(trim(sh(fetch + " >/dev/null 2>&1; echo $?")));
+	// при сбое кэш не тронут → остаётся старый рабочий список). Источник — DEFAULT_SOURCE в
+	// list/list.uc: решение проекта, не настройка пользователя.
+	let rc = int(trim(sh(engine_cli("list/fetch.uc") + " >/dev/null 2>&1; echo $?")));
 	if (rc != 0)
 		respond(make_error("не удалось обновить список — кэш не тронут (см. logread)"));
 
@@ -476,7 +473,7 @@ function m_update_list(v) {
 	let cfg = load_cfg();
 	cfg.domains = assemble_domains(cfg.user_domains);
 	save_cfg(cfg);
-	let rc_dns = reapply_step("dns", cfg);
+	let rc_dns = reapply_dns(cfg);
 	if (rc_dns != 0)
 		respond(make_error("список обновлён, но DNS-шаг не применился", { dns: rc_dns }));
 	respond({ status: "ok", direct_domains: length(cfg.domains) });
@@ -567,14 +564,31 @@ function m_service_restart(v) {
 	// установки/replace валит её пробу — инвариант «PID-файл = взаимное исключение».
 	if (pid_alive())
 		respond(make_error("операция уже выполняется"));
-	// сервисы data-plane (без podkop — вырезан). Перезапуск — I/O, движковой логики нет.
+	// «Туннель» — по ШАГУ активного протокола (watchdog.restart_tunnel_cmd, под юнитами):
+	// у Full-тира это сервис sing-box + netifd-интерфейс, у AWG — интерфейс awg0.
 	if (v.service == "vpn")
-		sh("ifdown awg0 2>/dev/null; sleep 1; ifup awg0 2>/dev/null");
+		sh(restart_tunnel_cmd(load_cfg()));
 	else if (v.service == "dns")
 		sh("/etc/init.d/dnsmasq restart >/dev/null 2>&1");
 	else if (v.service == "doh")
 		sh("/etc/init.d/https-dns-proxy restart >/dev/null 2>&1");
 	respond({ status: "restarted", service: v.service });
+}
+
+// m_pause_protection / m_resume_protection — аварийный режим (см. install/pause.uc).
+// Синхронно: операция короткая (снять правила + reload сети), а человек в этот момент смотрит
+// в панель и ждёт ответа «получилось». Взаимный замок — тот же, что у прочих мутаций.
+function toggle_protection(resume) {
+	if (pid_alive())
+		respond(make_error("операция уже выполняется"));
+	if (!access(CFG_FILE))
+		respond(make_error("роутер не настроен — аварийный режим не к чему применять"));
+	let rc = sh(sprintf("%s%s >/dev/null 2>&1; echo $?",
+		engine_cli("install/pause.uc"), resume ? " --resume" : ""));
+	if (int(trim(rc)) != 0)
+		respond(make_error(resume ? "не удалось вернуть защиту (см. logread)"
+		                          : "не удалось выключить защиту (см. logread)"));
+	respond({ status: "ok", paused: !resume });
 }
 
 function m_set_dns_provider(v) {
@@ -809,6 +823,8 @@ else if (method == "install_cancel")        m_install_cancel(v);
 else if (method == "set_mode")              m_set_mode(v);
 else if (method == "update_list")           m_update_list(v);
 else if (method == "service_restart")       m_service_restart(v);
+else if (method == "pause_protection")      toggle_protection(false);
+else if (method == "resume_protection")     toggle_protection(true);
 else if (method == "set_dns_provider")      m_set_dns_provider(v);
 else if (method == "replace_awg_conf")      m_replace_awg_conf(v);
 // Замена сервера и смена туннеля — тонкие обёртки над ОДНОЙ реализацией каждая: различаются

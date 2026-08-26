@@ -1,9 +1,8 @@
-// test_rollback.uc — юнит-тесты политики отката. Без роутера.
+// test_rollback.uc — юнит-тесты реестра чистых конфигов. Без роутера.
 //   ucode -R engine/rollback/tests/test_rollback.uc
 
 import { test, eq, ok, deep_eq, summary } from "../../lib/assert.uc";
-import { protected_configs, is_clean_config, classify,
-         plan_snapshot, decide } from "../rollback.uc";
+import { protected_configs, is_clean_config } from "../rollback.uc";
 
 test("is_clean_config: наши uci-конфиги чистые, прочее — нет", () => {
 	ok(is_clean_config("network"));
@@ -16,44 +15,11 @@ test("is_clean_config: наши uci-конфиги чистые, прочее �
 	ok(!is_clean_config("awg0-link"));
 });
 
-test("classify: clean для uci-конфига, dirty для всего прочего (честность)", () => {
-	eq(classify("network").class, "clean");
-	eq(classify("kmod-amneziawg").class, "dirty");
-	eq(classify("runtime-service").class, "dirty");
-	ok(length(classify("kmod-amneziawg").reason) > 0, "у dirty есть причина");
-});
-
-test("protected_configs: возвращает копию (мутация не ломает внутренний список)", () => {
+test("protected_configs: полный список и копия (мутация не ломает внутренний)", () => {
 	let a = protected_configs();
+	deep_eq(a, [ "network", "dhcp", "firewall", "https-dns-proxy", "wireless", "sing-box" ]);
 	push(a, "hacked");
-	let b = protected_configs();
-	ok(index(b, "hacked") < 0, "внутренний список не затронут");
-});
-
-test("plan_snapshot: по умолчанию — все защищаемые, ok", () => {
-	let p = plan_snapshot(null);
-	ok(p.ok);
-	deep_eq(p.configs, [ "network", "dhcp", "firewall", "https-dns-proxy", "wireless", "sing-box" ]);
-});
-
-test("plan_snapshot: грязная цель → ok=false с причиной, в configs не попадает", () => {
-	let p = plan_snapshot([ "network", "kmod-amneziawg" ]);
-	ok(!p.ok, "транзакцию для грязного не строим");
-	ok(length(p.errors) >= 1);
-	deep_eq(p.configs, [ "network" ], "только чистые");
-});
-
-test("plan_snapshot: подмножество чистых конфигов", () => {
-	let p = plan_snapshot([ "dhcp", "firewall" ]);
-	ok(p.ok);
-	deep_eq(p.configs, [ "dhcp", "firewall" ]);
-});
-
-test("decide: ok → commit, иначе → rollback (fail-safe)", () => {
-	eq(decide({ ok: true }), "commit");
-	eq(decide({ ok: false }), "rollback");
-	eq(decide(null), "rollback", "нет результата → откат");
-	eq(decide({}), "rollback", "ok отсутствует → откат");
+	ok(index(protected_configs(), "hacked") < 0, "внутренний список не затронут");
 });
 
 exit(summary());

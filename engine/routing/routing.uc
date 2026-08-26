@@ -1,10 +1,7 @@
-// routing.uc — генератор конфигов split-routing (чистая логика, юниты — engine/routing/tests).
-// Вход: домены прямого доступа + опции (mark, table, сеты, WAN, режим). Выход: план + рендереры
-// в три артефакта data-plane — dnsmasq nftset-строки ([[dnsmasq-nftset]]), nft сеты+правила и
-// ip rule/route ([[policy-routing]]). Идемпотентность, применение, резолв WAN — не здесь (engine/steps).
-//
+// routing.uc — генератор split-routing (чисто; тесты: tests/): домены + опции → план и рендереры
+// трёх артефактов: dnsmasq nftset ([[dnsmasq-nftset]]), nft сеты+правила, ip rule/route ([[policy-routing]]).
 // ИНВАРИАНТ: доменно-зависим ТОЛЬКО dnsmasq-слой; nft/ip rule — функция от опций (ядро смотрит
-// на сет по ссылке @direct, который наполняет dnsmasq).
+// на сет @direct по ссылке, наполняет его dnsmasq).
 
 // Значения по умолчанию. Переопределяются через opts в build_plan().
 const DEFAULTS = {
@@ -20,6 +17,7 @@ const DEFAULTS = {
 	                    // output = локально-сгенерированный трафик (нужно для netns-теста)
 	wan_if: null,       // имя WAN-интерфейса для default-маршрута в table; без него строки нет
 	wan_gw: null,       // шлюз WAN (если есть); не хардкодим — приходит из steps/preflight
+	dns_uid: null,      // uid резервного DoH-экземпляра (см. render_iprules); null → правила нет
 };
 
 // set_names() → имена наших nft-сетов [v4, v6]. Единственный источник для всех, кто матчит
@@ -38,6 +36,12 @@ function resolve_opts(opts) {
 			if (exists(DEFAULTS, k))
 				o[k] = opts[k];
 	return o;
+}
+
+// default_opts() — копия дефолтов (mark/table/сеты). Единственный источник для тех, кому нужны
+// ЧИСЛА, а не план: invariants/gather, диагностика. Хардкод на той стороне разъехался бы молча.
+function default_opts() {
+	return resolve_opts(null);
 }
 
 // normalize_domain(raw) — привести к каноничной форме для матчинга в dnsmasq:
@@ -151,10 +155,9 @@ function render_nft(plan) {
 	return out;
 }
 
-// render_iprules(plan) — команды policy routing: правило fwmark→table + default в table через WAN.
-// В travel-режиме пусто: без правила направления весь трафик идёт main-таблицей (туннель).
-// default-маршрут таблицы требует WAN-интерфейс (не хардкодим — приходит из steps/preflight);
-// без wan_if строку маршрута не генерируем (правило fwmark всё равно полезно).
+// render_iprules(plan) — policy routing: fwmark→table, «резервный DNS по владельцу сокета»→table,
+// default таблицы через WAN (без wan_if — без маршрута). В travel ПУСТО, включая резервный DNS:
+// в поездке мимо туннеля не уходит ничего (fail-closed). Подробно: [[encrypted-dns]].
 function render_iprules(plan) {
 	let o = plan.opts, out = [];
 	if (o.mode == "travel")
@@ -162,6 +165,16 @@ function render_iprules(plan) {
 	push(out, sprintf("ip rule add fwmark %s lookup %d", o.mark, o.table));
 	if (o.ipv6)
 		push(out, sprintf("ip -6 rule add fwmark %s lookup %d", o.mark, o.table));
+	// ИНВАРИАНТ: резервный DoH-экземпляр уводится мимо туннеля ПО ВЛАДЕЛЬЦУ СОКЕТА (uidrange), а
+	// не по метке в nft. Правило по владельцу действует уже при выборе маршрута (connect()),
+	// поэтому сокет берёт WAN'овский src. Пометка в output-хуке для этого НЕ годится: src
+	// выбирается ДО хука, пакет уходит в WAN с адресом туннеля и ответа нет (проверено в QEMU
+	// 2026-08-23). Кто этот пользователь — знает каталог DoH (steps/doh/providers.wan_user).
+	if (o.dns_uid != null) {
+		push(out, sprintf("ip rule add uidrange %d-%d lookup %d", o.dns_uid, o.dns_uid, o.table));
+		if (o.ipv6)
+			push(out, sprintf("ip -6 rule add uidrange %d-%d lookup %d", o.dns_uid, o.dns_uid, o.table));
+	}
 	if (o.wan_if) {
 		if (o.wan_gw)
 			push(out, sprintf("ip route add default via %s dev %s table %d",
@@ -183,4 +196,4 @@ function render_all(plan) {
 	};
 }
 
-export { set_names, normalize_domain, is_valid_domain, build_plan, render_dnsmasq, render_sets, render_mark_rules, render_nft, render_iprules, render_all };
+export { set_names, default_opts, normalize_domain, is_valid_domain, build_plan, render_dnsmasq, render_sets, render_mark_rules, render_nft, render_iprules, render_all };

@@ -7,8 +7,8 @@ const VPN_DEFAULTS = {
 	mtu: "1420",
 	keepalive: "25",
 	// arm:false — только для первой установки (run.uc, apply.uc --no-arm): интерфейс поднимается
-	// и хендшейк возможен (WireGuard не смотрит на routing table), но route_allowed_ips остаётся
-	// '0' — дом не переключается на туннель, пока health-check его не подтвердит. Довооружает
+	// и хендшейк возможен (WireGuard не смотрит на routing table), но half-routes не создаются —
+	// дом не переключается на туннель, пока health-check его не подтвердит. Довооружает
 	// apply.uc --arm. См. [[reliability]].
 	arm: true,
 };
@@ -22,6 +22,20 @@ const OBFUSCATION = [
 	"I1", "I2", "I3", "I4", "I5",
 ];
 
+// ИНВАРИАНТ: маршрут «всё в туннель» держат HALF-ROUTES (0.0.0.0/1 + 128.0.0.0/1, v6 ::/1 + 8000::/1),
+// а НЕ один default: они специфичнее WAN-дефолта и побеждают его, НЕ УДАЛЯЯ — WAN остаётся путём
+// для direct-трафика, endpoint'а туннеля и самого роутера. Тот же механизм у Full-тира (singbox.uc).
+// ШРАМ: route_allowed_ips='1' замещал WAN-дефолт → исчез awg0 → роутер без пути наружу до ребута
+// (QEMU, 2026-08-22). Подробно: [[reliability]].
+const HALF_ROUTES = [
+	{ suffix: "_route4lo", type: "route",  target: "0.0.0.0/1" },
+	{ suffix: "_route4hi", type: "route",  target: "128.0.0.0/1" },
+	// v6 наравне с v4: allowed_ips '::/0' и раньше давал ::/0 dev awg0 — поведение туннеля для
+	// IPv6 не меняем, меняем только способ держать маршрут.
+	{ suffix: "_route6lo", type: "route6", target: "::/1" },
+	{ suffix: "_route6hi", type: "route6", target: "8000::/1" },
+];
+
 function resolve_opts(opts) {
 	let o = {};
 	for (let k in VPN_DEFAULTS) o[k] = VPN_DEFAULTS[k];
@@ -29,11 +43,58 @@ function resolve_opts(opts) {
 	return o;
 }
 
-// owned_sections(opts?) → имена uci-секций network, которыми владеет шаг (интерфейс + peer).
-// Единственный источник для тех, кто их сносит (install/reset.uc) — не дрейфует при переименовании.
+// owned_sections(opts?) → имена uci-секций network, которыми владеет шаг: интерфейс, peer и
+// route-секции half-routes. ИНВАРИАНТ: [0] — интерфейс (по нему ifdown). Единственный источник
+// для тех, кто их сносит (install/reset.uc) — не дрейфует при переименовании.
 function owned_sections(opts) {
 	let o = resolve_opts(opts);
-	return [ o.interface, o.interface + "_peer" ];
+	let out = [ o.interface, o.interface + "_peer" ];
+	for (let i = 0; i < length(HALF_ROUTES); i++)
+		push(out, o.interface + HALF_ROUTES[i].suffix);
+	return out;
+}
+
+// route_sections(opts?) → только имена route-секций half-routes (для тестов и диагностики).
+function route_sections(opts) {
+	let ifname = resolve_opts(opts).interface, out = [];
+	for (let i = 0; i < length(HALF_ROUTES); i++)
+		push(out, ifname + HALF_ROUTES[i].suffix);
+	return out;
+}
+
+// no_proto_route_op(ifname) → uci-операция «proto-handler свой маршрут НЕ ставит» (см. HALF_ROUTES).
+function no_proto_route_op(ifname) {
+	return sprintf("set network.%s_peer.route_allowed_ips='0'", ifname);
+}
+
+// build_disarm_ops(opts) → { teardown, setup } — «снять маршрут туннеля, КОНФИГ НЕ ТРОГАЯ».
+// Интерфейс остаётся настроенным (ключи, endpoint, обфускация) — вернуть вооружение можно одним
+// движением. Нужен аварийному режиму (install/pause.uc): туннель мёртв, а дом должен выйти в
+// сеть напрямую. teardown применяют по одной через `uci -q` (delete отсутствующей секции — норма,
+// а uci_batch считает сбоем любой вывод).
+function build_disarm_ops(opts) {
+	let ifname = resolve_opts(opts).interface;
+	let teardown = [], rs = route_sections(opts);
+	for (let i = 0; i < length(rs); i++)
+		push(teardown, "delete network." + rs[i]);
+	return { teardown: teardown, setup: [ no_proto_route_op(ifname) ] };
+}
+
+// build_arm_ops(opts) → { teardown, setup } — «вооружить маршрут туннеля»: half-routes плюс
+// запрет proto-handler'у ставить свой default. Идемпотентно (delete-before-set, список удаления
+// общий с build_disarm_ops — не разъедется). Зовут два пути: build_vpn_plan (arm=true) и
+// apply.uc --arm — довооружение после health-check и миграция установок со старой схемой.
+function build_arm_ops(opts) {
+	let ifname = resolve_opts(opts).interface;
+	let d = build_disarm_ops(opts);
+	let setup = [ d.setup[0] ];
+	for (let i = 0; i < length(HALF_ROUTES); i++) {
+		let r = HALF_ROUTES[i], sect = ifname + r.suffix;
+		push(setup, sprintf("set network.%s=%s", sect, r.type));
+		push(setup, sprintf("set network.%s.interface='%s'", sect, ifname));
+		push(setup, sprintf("set network.%s.target='%s'", sect, r.target));
+	}
+	return { teardown: d.teardown, setup: setup };
 }
 
 // valid_port(host, port) → {host, port} или null: порт 1..65535 (вход пользователя; "99999"
@@ -111,10 +172,15 @@ function build_vpn_plan(parsed, opts) {
 	if (length(errors) > 0)
 		return { ok: false, errors: errors, teardown: [], setup: [] };
 
+	let arm = build_arm_ops(o);
 	let teardown = [
 		sprintf("delete network.%s", ifname),
 		sprintf("delete network.%s", peersect),
 	];
+	// route-секции сносим всегда: пере-применение с --no-arm обязано СНЯТЬ прежние half-routes,
+	// иначе «не вооружён» остался бы вооружённым.
+	for (let i = 0; i < length(arm.teardown); i++)
+		push(teardown, arm.teardown[i]);
 
 	let setup = [];
 	push(setup, sprintf("set network.%s=interface", ifname));
@@ -147,12 +213,16 @@ function build_vpn_plan(parsed, opts) {
 	push(setup, sprintf("set network.%s.endpoint_port='%s'", peersect, ep.port));
 	push(setup, sprintf("set network.%s.persistent_keepalive='%s'",
 		peersect, peer.PersistentKeepalive ?? o.keepalive));
-	// ИНВАРИАНТ: route_allowed_ips='1' — netifd держит default dev awg0 (туннель = дефолт для
-	// не-direct), direct уходит мимо через mark→table-100 (routing/firewall), конфликта нет
-	// (разные таблицы). fail-safe: промах direct-списка = трафик в туннель, а не мимо kill-switch'а.
-	// o.arm=false (первая установка, до health-check) — временно '0': хендшейк не зависит от
-	// routing table, а дом не переключается на непроверенный туннель. Довооружает apply.uc --arm.
-	push(setup, sprintf("set network.%s.route_allowed_ips='%s'", peersect, o.arm ? "1" : "0"));
+	// Вооружение = наличие half-routes (см. HALF_ROUTES): туннель — дефолт для всего, что не
+	// помечено direct, а direct уходит мимо через mark→table-100 (routing/firewall) — разные
+	// таблицы, конфликта нет. fail-safe: промах direct-списка = трафик в туннель, а не мимо
+	// kill-switch'а. o.arm=false (первая установка, до health-check) — интерфейс поднимается,
+	// хендшейк идёт, но дом на непроверенный туннель не переключается (довооружает apply.uc --arm).
+	if (o.arm)
+		for (let i = 0; i < length(arm.setup); i++)
+			push(setup, arm.setup[i]);
+	else
+		push(setup, no_proto_route_op(ifname));
 
 	return {
 		ok: true, errors: [],
@@ -161,4 +231,5 @@ function build_vpn_plan(parsed, opts) {
 	};
 }
 
-export { owned_sections, split_endpoint, parse_awg_conf, build_vpn_plan };
+export { owned_sections, route_sections, build_arm_ops, build_disarm_ops, split_endpoint, parse_awg_conf,
+         build_vpn_plan };

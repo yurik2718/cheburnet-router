@@ -26,6 +26,13 @@ function resolve_opts(opts) {
 	return o;
 }
 
+// chain_names(opts?) → имена наших nft-цепочек [пометка, kill-switch]. Единственный источник для
+// тех, кто их ПРОВЕРЯЕТ (invariants/gather), а не строит — не дрейфует при переименовании.
+function chain_names(opts) {
+	let o = resolve_opts(opts);
+	return [ o.mark_chain, o.ks_chain ];
+}
+
 // build_nat_ops(opts) → { teardown, setup }: uci-зона туннеля (masq+mtu_fix) + forwarding lan→vpn.
 // Именованные секции, идемпотентно (delete-before-set). Чистый uci-конфиг (∈ CLEAN_CONFIGS,
 // откатывается snapshot'ом), в отличие от nft/ip ниже — применять ДО nft-инъекции (apply.uc).
@@ -102,26 +109,45 @@ function render_nft_file(routing_plan, o) {
 	return { content: join("\n", L) + "\n", killswitch: ks };
 }
 
-// render_hotplug() → текст hotplug-хука (POSIX sh, busybox-ash).
-// ШРАМ: ip-часть data-plane (policy routing) живёт только в ядре и не переживает ребут — split
-// молча уходит в туннель, панель остаётся зелёной. Хук зовёт reapply.uc на ifup ЛЮБОГО
-// интерфейса (имя WAN-логики в netifd не гарантировано) и ждёт ОБА артефакта (правило И маршрут
-// в таблице direct) — иначе гейт «есть правило» закрывает починку навсегда после половинчатого
-// первого ifup. Подробно: [[0004-multi-protocol-tiers]] (п.2). Номер таблицы — из плана, не зашит.
-function render_hotplug(table) {
-	return join("\n", [
+// render_hotplug(table, tunnel_if, mode?, ks_chain?) → текст hotplug-хука (POSIX sh, busybox-ash).
+// ШРАМ: ip-часть data-plane живёт только в ядре и не переживает ребут — split молча уходит в
+// туннель при зелёной панели. Хук зовёт reapply.uc на ifup ЛЮБОГО интерфейса (имя WAN-логики в
+// netifd не гарантировано). Гейт «всё на месте» сверяет маршрут таблицы с ТЕКУЩИМ WAN (прежний
+// пропускал протухший маршрут) и ждёт ОБА артефакта. В travel правил направления нет по замыслу —
+// там целостность = kill-switch в ядре; гейт по fwmark заставлял бы переприменять на каждый ifup.
+function render_hotplug(table, tunnel_if, mode, ks_chain) {
+	let tun = tunnel_if ?? "awg0";
+	let gate = (mode == "travel")
+		? [ "# В поездке правил направления нет по замыслу: целостность — kill-switch в ядре.",
+		    sprintf("if nft list chain inet fw4 %s 2>/dev/null | grep -q drop; then", ks_chain ?? "cheburnet_ks"),
+		    "\texit 0",
+		    "fi" ]
+		: [ "# Текущий WAN — первый дефолт МИМО туннеля; и с ним сверяем маршрут direct-таблицы.",
+		    sprintf("cur=$(ip -4 route show default 2>/dev/null | grep -v ' dev %s' | \\", tun),
+		    "      sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -1)",
+		    sprintf("tab=$(ip route show table %d 2>/dev/null | grep '^default' | \\", table),
+		    "      sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -1)",
+		    "# Всё сходится — выходим сразу (дешёвый путь на каждый ifup).",
+		    "if ip rule show 2>/dev/null | grep -q fwmark && \\",
+		    '   [ -n "$cur" ] && [ "$cur" = "$tab" ]; then',
+		    "\texit 0",
+		    "fi" ];
+	let head = [
 		"#!/bin/sh",
 		"# cheburnet: вернуть ip-часть data-plane (policy-routing) — она живёт только в ядре.",
 		"# Файл создаёт шаг firewall; правки перезапишутся при следующем применении.",
 		'[ "$ACTION" = "ifup" ] || exit 0',
-		"# Оба артефакта на месте — выходим сразу (дешёвый путь на каждый ifup).",
-		sprintf("if ip rule show 2>/dev/null | grep -q fwmark && \\"),
-		sprintf("   ip route show table %d 2>/dev/null | grep -q default; then", table),
+		"# Идёт установка/замена сервера — она сама двигает сеть (pid-файл + done-маркер ubus-слоя).",
+		'p=$(cat /tmp/cheburnet/pid 2>/dev/null)',
+		'if [ ! -f /tmp/cheburnet/done ] && [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then',
 		"\texit 0",
 		"fi",
+	];
+	let tail = [
 		"ucode -R /usr/share/cheburnet/engine/install/reapply.uc >/dev/null 2>&1",
 		"exit 0",
-	]) + "\n";
+	];
+	return join("\n", head) + "\n" + join("\n", gate) + "\n" + join("\n", tail) + "\n";
 }
 
 // build_firewall_plan(routing_plan, opts) → структурный план (nft/ip/uci).
@@ -138,18 +164,25 @@ function build_firewall_plan(routing_plan, opts) {
 
 	let nft = render_nft_file(routing_plan, o);
 
-	// policy routing: правило fwmark + default в table через WAN (из routing). Teardown —
-	// снять правило и очистить таблицу (ip rule add не идемпотентен → del перед add).
+	// policy routing: правило fwmark + default в table через WAN (из routing). Teardown — снять
+	// правила и очистить таблицу; НЕ зависит от режима: он снимает то, что оставил ПРЕЖНИЙ режим.
+	// ШРАМ (qemu-emergency, 2026-08-26): в travel teardown был пуст → после home→travel правила
+	// fwmark/uidrange оставались в ядре, и резервный DNS ходил мимо туннеля «в поездке».
 	let ip_setup = render_iprules(routing_plan);
-	let ip_teardown = [];
-	if (ro.mode != "travel") {
-		push(ip_teardown, sprintf("ip rule del fwmark %s lookup %d", ro.mark, ro.table));
+	let ip_teardown = [
+		sprintf("ip rule del fwmark %s lookup %d", ro.mark, ro.table),
+	];
+	if (ro.ipv6)
+		push(ip_teardown, sprintf("ip -6 rule del fwmark %s lookup %d", ro.mark, ro.table));
+	// Правило резервного DNS снимаем ВСЕГДА, когда знаем uid: `ip rule add` не идемпотентен.
+	if (ro.dns_uid != null) {
+		push(ip_teardown, sprintf("ip rule del uidrange %d-%d lookup %d", ro.dns_uid, ro.dns_uid, ro.table));
 		if (ro.ipv6)
-			push(ip_teardown, sprintf("ip -6 rule del fwmark %s lookup %d", ro.mark, ro.table));
-		push(ip_teardown, sprintf("ip route flush table %d", ro.table));
-		if (ro.ipv6)
-			push(ip_teardown, sprintf("ip -6 route flush table %d", ro.table));
+			push(ip_teardown, sprintf("ip -6 rule del uidrange %d-%d lookup %d", ro.dns_uid, ro.dns_uid, ro.table));
 	}
+	push(ip_teardown, sprintf("ip route flush table %d", ro.table));
+	if (ro.ipv6)
+		push(ip_teardown, sprintf("ip -6 route flush table %d", ro.table));
 
 	// NAT-зона туннеля (uci firewall, чистый откат). Выключаемо через fw_opts.nat=false.
 	let nat = o.nat ? build_nat_ops(o) : { teardown: [], setup: [] };
@@ -171,7 +204,7 @@ function build_firewall_plan(routing_plan, opts) {
 		nft_path: NFT_PATH,
 		nft_file: nft.content,
 		hotplug_path: HOTPLUG_PATH,
-		hotplug_file: render_hotplug(ro.table),
+		hotplug_file: render_hotplug(ro.table, o.tunnel_if, ro.mode, o.ks_chain),
 		nft_teardown: nft_teardown,
 		ip_teardown: ip_teardown,
 		ip_setup: ip_setup,
@@ -179,4 +212,4 @@ function build_firewall_plan(routing_plan, opts) {
 	};
 }
 
-export { NFT_PATH, HOTPLUG_PATH, build_nat_ops, render_nft_file, render_hotplug, build_firewall_plan };
+export { NFT_PATH, HOTPLUG_PATH, chain_names, build_nat_ops, render_nft_file, render_hotplug, build_firewall_plan };

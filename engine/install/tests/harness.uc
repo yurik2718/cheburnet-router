@@ -51,6 +51,7 @@ function mk_sandbox() {
 		state:  root + "/state",      // STATE_FILE
 		reason: root + "/reason",     // REASON_FILE
 		calls:  root + "/calls.log",
+		crontab: root + "/crontab",   // CRONTAB_FILE: сторож ставит cron-запись — в sandbox, не в /etc хоста
 	};
 	mkdir(sb.bin, 0o755); mkdir(sb.fake, 0o755);
 	mkdir(sb.etc, 0o755); mkdir(sb.config, 0o755);
@@ -110,10 +111,12 @@ function env_prefix(sb) {
 	return sprintf(
 		"PATH=%s:$PATH CALLS=%s FAKE_DIR=%s UCI_CONFIG_DIR=%s SNAPSHOT_DIR=%s " +
 		"ETC_CHEBURNET=%s SB_CONFIG=%s STATE_FILE=%s REASON_FILE=%s SB_SLEEP=0 SB_RETRIES=2 " +
+		// Без override cron.uc правил бы /etc/crontabs/root ХОСТА (а CI ходит под root).
+		"CRONTAB_FILE=%s " +
 		// Артефакты, которые шаг firewall пишет в /etc: в sandbox таких каталогов нет.
 		"CHEB_NFT_PATH=%s CHEB_HOTPLUG_PATH=%s",
 		sb.bin, sb.calls, sb.fake, sb.config, sb.snap,
-		sb.etc, sb.sbconf, sb.state, sb.reason, sb.nft, sb.hotplug);
+		sb.etc, sb.sbconf, sb.state, sb.reason, sb.crontab, sb.nft, sb.hotplug);
 }
 
 // run_uc(sb, rel, args?, stdin_text?, extra_env?) → { rc, out } — запустить engine/<rel> в sandbox

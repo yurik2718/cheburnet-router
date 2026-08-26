@@ -4,8 +4,13 @@
 import { test, eq, ok, deep_eq, summary } from "../../lib/assert.uc";
 import { cmp_version, cidr_overlap, evaluate, render_report,
          suggest_lan, valid_lan_ip, evaluate_tiers, full_requirements,
-         supports_full_hw, full_hw_missing, default_requirements,
+         full_hw_missing, default_requirements,
          soft_failed_ids } from "../preflight.uc";
+
+// «железо потянет Full» = список нехваток пуст (одна функция на панель и на этот тест).
+function supports_full_hw(arch, ram, flash, req) {
+	return length(full_hw_missing(arch, ram, flash, req)) == 0;
+}
 
 // Хорошие факты — каждый тест портит одно поле, чтобы проверить ровно его проверку.
 function good_facts() {
@@ -331,7 +336,8 @@ test("evaluate_tiers: full_installed=true даже когда железо сл�
 	ok(rep.full_installed, "но бинарь стоит — это отдельный факт");
 });
 
-// --- supports_full_hw: лёгкий гейт железа для видимости кнопки (m_status, каждый поллинг) ---
+// --- full_hw_missing: лёгкий гейт железа для видимости кнопки (m_status, каждый поллинг) ---
+
 test("supports_full_hw: годная arch + RAM/флеш ≥ порогов → true", () => {
 	ok(supports_full_hw("aarch64", 512, 200, null));
 	ok(supports_full_hw("x86_64", 240, 44, null), "ровно пороги 240/44 проходят");

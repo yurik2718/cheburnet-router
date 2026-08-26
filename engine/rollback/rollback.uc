@@ -1,10 +1,6 @@
-// rollback.uc — точечный откат: ЧИСТОЕ ядро политики «что откатывается транзакцией»
-// (классификация, реестр, решение commit/rollback). Реальные snapshot/restore — snapshot.uc
-// (импурно, QEMU).
-//
-// ИНВАРИАНТ ([[reliability]], кирпич 3): транзакцией (snapshot→шаг→health-check→commit/restore)
-// накрыты ТОЛЬКО uci-конфиги — откат чистый. Грязный откат (kmod/линк/сервис) под транзакцию
-// не маскируем — для него safe-fail с понятной ошибкой.
+// rollback.uc — реестр uci-конфигов, которые откатываются транзакцией (чисто). snapshot.uc — I/O.
+// ИНВАРИАНТ: транзакцией накрыты ТОЛЬКО uci-конфиги; грязное (kmod/сервис/ядро) — teardown шага,
+// не иллюзия отката. Подробно: [[reliability]].
 
 // UCI-конфиги, которые трогают наши шаги и которые откатываются ЧИСТО.
 const CLEAN_CONFIGS = [ "network", "dhcp", "firewall", "https-dns-proxy", "wireless", "sing-box" ];
@@ -21,36 +17,4 @@ function is_clean_config(name) {
 	return index(CLEAN_CONFIGS, name) >= 0;
 }
 
-// classify(target) → { class, reason }. clean = uci-конфиг (транзакция); всё прочее = dirty
-// (неизвестное считаем грязным — безопаснее): kmod, линк, рантайм-сервис не откатываются чисто.
-function classify(target) {
-	if (is_clean_config(target))
-		return { class: "clean", reason: "uci-конфиг — откат через snapshot/restore чистый" };
-	return {
-		class: "dirty",
-		reason: "не uci-конфиг (kmod/линк/сервис/состояние ядра) — safe-fail, не транзакция",
-	};
-}
-
-// plan_snapshot(configs) → { ok, errors, configs }. configs пуст/нет → берём protected_configs().
-// Отказывает, если среди целей есть грязная: транзакцию строим только для чистых конфигов.
-function plan_snapshot(configs) {
-	let list = (configs && length(configs) > 0) ? configs : protected_configs();
-	let errors = [], clean = [];
-	for (let i = 0; i < length(list); i++) {
-		let c = list[i];
-		if (is_clean_config(c))
-			push(clean, c);
-		else
-			push(errors, sprintf("%s: %s", c, classify(c).reason));
-	}
-	return { ok: length(errors) == 0, errors: errors, configs: clean };
-}
-
-// decide(health) → "commit" | "rollback". Чистое решение по результату health-check.
-// Любой не-ok (или отсутствие результата) → rollback: fail-safe в сторону отката.
-function decide(health) {
-	return (health && health.ok === true) ? "commit" : "rollback";
-}
-
-export { protected_configs, is_clean_config, classify, plan_snapshot, decide };
+export { protected_configs, is_clean_config };

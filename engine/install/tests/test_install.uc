@@ -4,9 +4,9 @@
 import { test, eq, ok, deep_eq, summary } from "../../lib/assert.uc";
 import { pick_wan_fallback } from "../../lib/route.uc";
 import { route_uses_iface, fresh_handshake,
-         all_steps, enabled_steps, snapshot_scope, dirty_steps,
-         decide_outcome, protocol_ids, default_protocol, tunnel_info,
-         uses_singbox, singbox_protocols, tunnel_conf,
+         enabled_steps, snapshot_scope, dirty_steps,
+         decide_outcome, protocol_ids, default_protocol, tunnel_info, tunnel_ifs,
+         uses_singbox, tunnel_conf,
          disabled_tunnels, handshake_state, tunnel_health,
          HANDSHAKE_FRESH_S } from "../install.uc";
 
@@ -17,7 +17,7 @@ function names(steps) {
 }
 
 test("порядок шагов: vpn → singbox → dns → doh → wifi → firewall (firewall последним)", () => {
-	deep_eq(names(all_steps()), [ "vpn", "singbox", "dns", "doh", "wifi", "firewall" ]);
+	deep_eq(names(enabled_steps({})), [ "vpn", "singbox", "dns", "doh", "wifi", "firewall" ]);
 });
 
 test("enabled_steps: disable убирает шаг, порядок сохраняется", () => {
@@ -25,17 +25,17 @@ test("enabled_steps: disable убирает шаг, порядок сохран�
 	deep_eq(names(s), [ "vpn", "dns", "wifi", "firewall" ]);
 });
 
-test("all_steps возвращает копию (мутация не ломает реестр)", () => {
-	let a = all_steps();
+test("enabled_steps возвращает копию (мутация не ломает реестр)", () => {
+	let a = enabled_steps({});
 	a[0].name = "HACKED";
 	push(a[0].configs, "x");
-	let b = all_steps();
+	let b = enabled_steps({});
 	eq(b[0].name, "vpn");
 	deep_eq(b[0].configs, [ "network" ]);
 });
 
 test("snapshot_scope: объединение чистых конфигов, дедуп; uci-часть dirty-шага входит", () => {
-	let scope = snapshot_scope(all_steps());
+	let scope = snapshot_scope(enabled_steps({}));
 	// dhcp у dns/doh → один раз; singbox вносит sing-box (uci-часть — чистый откат); wifi —
 	// wireless; firewall (dirty) — uci 'firewall' (NAT-зона), его nft/ip-часть — teardown, не snapshot
 	deep_eq(scope, [ "network", "sing-box", "dhcp", "https-dns-proxy", "wireless", "firewall" ]);
@@ -49,7 +49,7 @@ test("snapshot_scope: reality-протокол (vpn off, singbox on) → sing-bo
 });
 
 test("dirty_steps: singbox + firewall (runtime config.json/nft/ip → safe-fail teardown)", () => {
-	deep_eq(dirty_steps(all_steps()), [ "singbox", "firewall" ]);
+	deep_eq(dirty_steps(enabled_steps({})), [ "singbox", "firewall" ]);
 });
 
 // КРИТИЧНО для чистой смены протокола: перед шагами run.uc делает teardown НЕактивного туннеля
@@ -97,12 +97,15 @@ test("оба sing-box-протокола презентуют ОДИН инте�
 	eq(tunnel_info("reality").step, tunnel_info("hysteria2").step);
 });
 
-test("uses_singbox / singbox_protocols: Full-протоколы определяются по ШАГУ, не по списку имён", () => {
+test("uses_singbox: Full-протоколы определяются по ШАГУ, не по списку имён", () => {
 	ok(!uses_singbox("awg"), "awg считается в ядре");
 	ok(uses_singbox("reality"));
 	ok(uses_singbox("hysteria2"));
 	ok(!uses_singbox("bogus"), "неизвестный → дефолтный awg → не Full (fail-safe)");
-	deep_eq(singbox_protocols(), [ "reality", "hysteria2" ]);
+});
+
+test("tunnel_ifs: интерфейсы всех туннелей без дублей (оба Full-протокола — один singtun0)", () => {
+	deep_eq(tunnel_ifs(), [ "awg0", "singtun0" ], "по нему lib/wan.uc ищет WAN «мимо туннелей»");
 });
 
 test("tunnel_conf: конфиг берётся по conf_key активного протокола", () => {

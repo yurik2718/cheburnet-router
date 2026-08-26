@@ -1,14 +1,7 @@
-// check.uc — CLI-гейткипер: читает факты о системе (JSON со stdin) → отчёт preflight.
-//
-//   echo '{"arch":"aarch64","openwrt_version":"25.12.0","flash_free_mb":100,
-//          "ram_total_mb":256,"deps_installable":{"kmod-amneziawg":true,...}}' \
-//     | ucode -R check.uc
-//
-// Факты собирает router-side companion (gather.uc, импурно). Здесь — только оценка.
+// check.uc — CLI-гейткипер: факты (JSON со stdin, см. gather.uc) → отчёт preflight (preflight.uc).
+//   ucode -R gather.uc | ucode -R check.uc [--json] [--allow-soft]
 // ИНВАРИАНТ: exit 0 = подходит, 1 = отказ — движок НЕ трогает систему при отказе.
-//
-// Флаги: --json (машинный отчёт для ubus/UI); --allow-soft (soft-провалы флеша/RAM не блокируют,
-// exit 0 пока нет hard-провалов — осознанный выбор владельца, install.accept_risk).
+// --allow-soft: провалы флеша/RAM не блокируют (осознанный выбор владельца, install.accept_risk).
 
 import { stdin } from "fs";
 import { evaluate, render_report, evaluate_tiers } from "./preflight.uc";

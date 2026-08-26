@@ -1,10 +1,6 @@
-// apply.uc — установка пароля root на роутере (импурно, router-side).
-//
-//   echo '{"root_password":"…"}' | ucode -R apply.uc            # применить
-//   echo '{"root_password":"…"}' | ucode -R apply.uc --dry-run  # только показать намерение
-//
-// JSON со stdin (не сырой текст) — значение пароля берём без двусмысленности с завершающим \n.
-// Валидация — чистое ядро rootpass.uc. Значение пароля НЕ логируем. Проверяется в QEMU.
+// apply.uc — установка пароля root (импурно; валидация — rootpass.uc). Пароль НЕ логируем.
+//   echo '{"root_password":"…"}' | ucode -R apply.uc [--dry-run]
+// JSON со stdin, не сырой текст — иначе двусмысленность с завершающим \n.
 
 import { stdin, popen } from "fs";
 import { validate_password } from "./rootpass.uc";

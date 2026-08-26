@@ -1,11 +1,7 @@
-// generate.uc — CLI-обёртка генератора split-routing. Запускается движком/ubus и из тестов.
-//
+// generate.uc — CLI генератора split-routing (routing.uc) для тестов и отладки.
 //   echo '{"what":"nft","domains":["example.com"],"opts":{"ipv6":false}}' | ucode -R generate.uc
-//   printf 'example.com\nexample.org\n'                                  | ucode -R generate.uc
-//
-// Stdin (граница доверия, см. CLAUDE.md): JSON { domains, opts, what } ИЛИ простые строки-домены
-// (what по умолчанию "all"). Вывод: секции — строки команд, "all" — JSON render_all. UCI-обёртку
-// dnsmasq здесь не генерим — это steps/dns (см. dns.uc).
+//   printf 'example.com\nexample.org\n' | ucode -R generate.uc       # what="all" → JSON render_all
+// Stdin — граница доверия: JSON { domains, opts, what } или строки-домены.
 
 import { stdin } from "fs";
 import { build_plan, render_all, render_dnsmasq,

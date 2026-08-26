@@ -1,10 +1,7 @@
-// ubus.js — клиент ubus JSON-RPC поверх uhttpd-mod-ubus (роутер отдаёт /ubus).
-//
-// Веб-мастер общается с движком (объект `cheburnet`, см. engine/ubus) через ubus. До установки
-// у пользователя нет сессии — ходим с НУЛЕВОЙ сессией; ACL пакета даёт анониму read + install
-// (мутации гейтятся install-токеном). Admin-методы (set_mode, service_restart, …) требуют
-// авторизованной сессии: login() получает её через ubus `session.login` (root + пароль —
-// стандартный механизм rpcd, тот же, что у LuCI) и дальше call() подставляет её во все вызовы.
+// ubus.js — клиент ubus JSON-RPC поверх uhttpd-mod-ubus (/ubus) к объекту `cheburnet` (engine/ubus).
+// До установки — НУЛЕВАЯ сессия (ACL даёт анониму read + install, мутации гейтит токен); admin-методы
+// требуют сессии от `session.login` (root + пароль, тот же механизм, что у LuCI) — login() её берёт,
+// call() подставляет.
 
 const UBUS_URL = '/ubus';
 const NULL_SESSION = '00000000000000000000000000000000';
@@ -69,6 +66,13 @@ export const cheburnet = (method, params) => call('cheburnet', method, params);
 // isLoggedIn() — есть ли (предположительно живая) admin-сессия. Протухание ловится по
 // PERMISSION_DENIED на вызове — UI тогда зовёт logout() и снова просит вход.
 export const isLoggedIn = () => session !== NULL_SESSION;
+
+// isAccessDenied(e) — отказ доступа в ОБЕИХ формах: без сессии uhttpd отсекает ДО ubus
+// ({code:-32002, "Access denied"}), с протухшей — ubus отдаёт статус 6 ("PERMISSION_DENIED").
+// ШРАМ: экраны матчили только вторую — первый вход не открывал модалку, человек видел голый «Access denied».
+export function isAccessDenied(e) {
+  return /PERMISSION_DENIED|Access denied/i.test(e.message);
+}
 
 export function logout() {
   session = NULL_SESSION;

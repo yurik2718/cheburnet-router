@@ -672,7 +672,7 @@ describe('fullMissingText — почему кнопки Full-тира нет', (
 
   it('флеш — причина, которую человек устранит сам, поэтому названа конкретно', () => {
     expect(fullMissingText(['flash'])).toMatch(/места/);
-    expect(fullMissingText(['flash'])).toMatch(/45 МБ/);
+    expect(fullMissingText(['flash'])).toMatch(/44 МБ/); // = preflight FULL_REQUIREMENTS.min_flash_mb
   });
 
   it('несколько причин перечисляются, пустой список → пусто', () => {

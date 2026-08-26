@@ -24,13 +24,9 @@ function validate_wifi(ssid, key) {
 	return { ok: length(errors) == 0, errors: errors };
 }
 
-// build_wifi_plan(ifaces, opts) → { ok, errors, teardown, setup, applied }.
-//   ifaces — имена секций wifi-iface; пусто → no-op (нет радио).
-//   opts   — { ssid, key, encryption?, pmf? }. encryption по умолчанию sae-mixed.
-//
-// Шрам (v1 T4): vanilla-секции default_radioN могут нести ieee80211w из коробки, а PMF на
-// чистом WPA2 (не-SAE) рвёт совместимость со старыми клиентами — поэтому в не-SAE режиме
-// ieee80211w УДАЛЯЕМ, а не оставляем как есть.
+// build_wifi_plan(ifaces, opts) → { ok, errors, teardown, setup, applied }. ifaces — секции wifi-iface
+// (пусто → no-op); opts — { ssid, key, encryption? (sae-mixed), pmf? }.
+// ШРАМ (v1): PMF (ieee80211w) на чистом WPA2 рвёт старых клиентов — в не-SAE режиме его УДАЛЯЕМ.
 function build_wifi_plan(ifaces, opts) {
 	let o = opts ?? {};
 	let enc = o.encryption ?? "sae-mixed";

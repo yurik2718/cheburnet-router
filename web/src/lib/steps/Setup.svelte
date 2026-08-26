@@ -1,21 +1,9 @@
 <script>
-  // onSubmit(args) — args для метода install: { protocol, <conf_key>, root_password, [ssid,
-  // wifi_key], domains, token }. onBack — вернуться на preflight.
-  // wirelessPresent — есть ли радио (из status): false → скрыть Wi-Fi; true → обязателен;
-  // null (статус не ответил) → показать как необязательный.
-  // initial — ранее собранные args («Назад» с экрана подтверждения не теряет введённое).
-  // dnsProviders — каталог фильтрующих DNS (из status); dnsProviderDefault — дефолтный id.
-  // fullAvailable — ТЯНЕТ ли железо Full-тир (из preflight.tiers.full): true → доступны
-  // VLESS+Reality и Hysteria2 (компонент догрузится автоматически при установке); false →
-  // их строки показаны НЕактивными с пояснением про требования (образовательно), выбрать нельзя.
-  // acceptRisk — пользователь прошёл экран проверки с непройденными soft-требованиями («всё равно
-  // установить»): напоминаем об этом и несём флаг в аргументы install (движок проверит ещё раз).
-  // fullReasons — ПОЧЕМУ Full-протоколы недоступны (из preflight.tiers.full_checks): человек
-  // должен видеть «не хватает RAM», а не безликое «недоступно».
-  //
-  // ГЛАВНОЕ В ЭТОМ ЭКРАНЕ: выбор туннеля идёт ОТ СИМПТОМА, а не от названий протоколов. Человек
-  // не знает, что такое DPI и QUIC, но точно знает, что у него не работает. Тексты — в каталоге
-  // PROTOCOLS (logic.js), здесь только разметка.
+  // Props: onSubmit(args для install) / onBack; wirelessPresent (false → без Wi-Fi, null → необязателен);
+  // initial («Назад» не теряет введённое); dnsProviders/dnsProviderDefault (каталог из status);
+  // fullAvailable (железо тянет Full → доступны Reality/Hysteria2, иначе строки неактивны с причиной
+  // из fullReasons); acceptRisk (soft-провалы preflight приняты — флаг едет в install).
+  // ГЛАВНОЕ: выбор туннеля идёт ОТ СИМПТОМА, не от названий протоколов — тексты в PROTOCOLS (logic.js).
   import { MIN_PASS, SSID_MAX, WIFI_KEY_MIN, validateSetup, BRUTAL_WARNING, checkConf,
            protocolList, protocolInfo, defaultProtocol, SPEED_DEFAULTS } from '../logic.js';
   import Card from '../ui/Card.svelte';

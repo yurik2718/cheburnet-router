@@ -1,14 +1,16 @@
-// doh.uc — DoH-шаг: настроить https-dns-proxy и завернуть upstream dnsmasq в него ([[encrypted-dns]]).
-// build_doh_plan(current, opts) → uci-операции для https-dns-proxy + dnsmasq (чистое ядро);
-// apply.uc применяет (импурно, QEMU). dnsmasq-привязку держим сами, не магией пакета.
+// doh.uc — DoH-шаг: build_doh_plan(current, opts) → uci-операции https-dns-proxy + dnsmasq (чисто;
+// apply.uc применяет). dnsmasq-привязку держим сами, не магией пакета. Подробно: [[encrypted-dns]].
+// ИНВАРИАНТ: экземпляров ДВА (через туннель и через WAN) и dnsmasq спрашивает их строго по порядку
+// (strictorder) — иначе резервный отвечал бы наперегонки, и DoH уходил бы мимо туннеля постоянно.
 
-import { reconcile_list, starts_with } from "../../lib/uci.uc";
+import { starts_with } from "../../lib/uci.uc";
 import { resolvers_for, default_provider } from "./providers.uc";
 
 const DOH_DEFAULTS = {
 	listen_addr: "127.0.0.1",
 	dnsmasq_section: "@dnsmasq[0]",
 	manage_dnsmasq: true, // отключаем авто-правку dnsmasq пакетом — рулим upstream сами
+	strict_order: true,   // спрашивать upstream'ы по порядку, а не наперегонки (см. ИНВАРИАНТ)
 	// Дефолт — провайдер по умолчанию из каталога (см. providers.uc). Резолверы каждого
 	// провайдера приходят opts.resolvers (их подставляет apply/plan по выбранному id).
 	resolvers: resolvers_for(default_provider()),
@@ -49,13 +51,25 @@ function build_doh_plan(current, opts) {
 	if (length(errors) > 0)
 		return { ok: false, errors: errors, hdp_teardown: [], hdp_setup: [], dnsmasq_ops: [] };
 
-	// teardown: снести все существующие https-dns-proxy секции + наши имена (dedup) — чистая замена.
-	let td = [], seen = {};
+	// teardown: снести ВСЕ существующие секции + наши имена — чистая замена. ШРАМ: анонимные секции
+	// пакета удаляются со сдвигом индексов — второй delete промахивался, чужой экземпляр занимал
+	// порт 5054 и подменял резервный (qemu-dns-fallback, 2026-08-23). Поэтому анонимные — в обратном
+	// порядке индексов и ДО именованных.
+	let td = [], seen = {}, anon = [], named = [];
 	let existing = (current && current.hdp_sections) ? current.hdp_sections : [];
 	for (let i = 0; i < length(existing); i++) {
 		let s = existing[i];
-		if (!seen[s]) { push(td, sprintf("delete https-dns-proxy.%s", s)); seen[s] = true; }
+		if (seen[s]) continue;
+		seen[s] = true;
+		let m = match(s, /^@[^\[]+\[(-?[0-9]+)\]$/);
+		if (m) push(anon, { name: s, idx: int(m[1]) });
+		else push(named, s);
 	}
+	sort(anon, (a, b) => b.idx - a.idx); // по убыванию индекса — удаление не сдвигает следующие
+	for (let i = 0; i < length(anon); i++)
+		push(td, sprintf("delete https-dns-proxy.%s", anon[i].name));
+	for (let i = 0; i < length(named); i++)
+		push(td, sprintf("delete https-dns-proxy.%s", named[i]));
 	for (let i = 0; i < length(R); i++) {
 		let n = R[i].name;
 		if (!seen[n]) { push(td, sprintf("delete https-dns-proxy.%s", n)); seen[n] = true; }
@@ -83,12 +97,20 @@ function build_doh_plan(current, opts) {
 		push(su, sprintf("set https-dns-proxy.%s.resolver_url='%s'", r.name, r.url));
 		if (r.bootstrap)
 			push(su, sprintf("set https-dns-proxy.%s.bootstrap_dns='%s'", r.name, r.bootstrap));
-		push(su, sprintf("set https-dns-proxy.%s.user='nobody'", r.name));
-		push(su, sprintf("set https-dns-proxy.%s.group='nogroup'", r.name));
+		// user/group — из каталога: у резервного экземпляра ОТДЕЛЬНЫЙ владелец, по нему
+		// steps/firewall уводит его сокеты мимо туннеля (см. ИНВАРИАНТ в providers.uc).
+		push(su, sprintf("set https-dns-proxy.%s.user='%s'", r.name, r.user ?? "nobody"));
+		push(su, sprintf("set https-dns-proxy.%s.group='%s'", r.name, r.group ?? "nogroup"));
+		// polling_interval — только если каталог его задал (см. providers.uc): у резервного
+		// экземпляра служебные перепроверки адреса резолвера видны провайдеру, поэтому они редкие.
+		if (r.polling)
+			push(su, sprintf("set https-dns-proxy.%s.polling_interval='%d'", r.name, r.polling));
 	}
 
-	// dnsmasq upstream: server = listen_addr#port каждого резолвера. Минимальный diff по НАШИМ
-	// записям (начинаются с listen_addr#) — чужие upstream-серверы пользователя сохраняем.
+	// dnsmasq upstream: server = listen_addr#port каждого резолвера, В ПОРЯДКЕ каталога. Чужие
+	// upstream-серверы пользователя не трогаем — работаем только со своими (listen_addr#).
+	// ПОРЯДОК ЗНАЧИМ (strict-order), поэтому сверяем СПИСКОМ, а не множеством: разошёлся порядок —
+	// переписываем свои записи целиком. Совпал — не трогаем вовсе (идемпотентность).
 	let desired = [];
 	for (let i = 0; i < length(R); i++)
 		push(desired, sprintf("%s#%d", o.listen_addr, R[i].port));
@@ -97,12 +119,17 @@ function build_doh_plan(current, opts) {
 	for (let i = 0; i < length(cur_servers); i++)
 		if (starts_with(cur_servers[i], o.listen_addr + "#"))
 			push(owned, cur_servers[i]);
-	let rec = reconcile_list(owned, desired);
 	let dops = [], sect = o.dnsmasq_section;
-	for (let i = 0; i < length(rec.remove); i++)
-		push(dops, sprintf("del_list dhcp.%s.server='%s'", sect, rec.remove[i]));
-	for (let i = 0; i < length(rec.add); i++)
-		push(dops, sprintf("add_list dhcp.%s.server='%s'", sect, rec.add[i]));
+	if (join("\n", owned) != join("\n", desired)) {
+		for (let i = 0; i < length(owned); i++)
+			push(dops, sprintf("del_list dhcp.%s.server='%s'", sect, owned[i]));
+		for (let i = 0; i < length(desired); i++)
+			push(dops, sprintf("add_list dhcp.%s.server='%s'", sect, desired[i]));
+	}
+	// strict-order — идемпотентный set (см. ИНВАРИАНТ в шапке).
+	let cur_opts = (current && current.options) ? current.options : {};
+	if (o.strict_order && cur_opts.strictorder != "1")
+		push(dops, sprintf("set dhcp.%s.strictorder='1'", sect));
 
 	// ШРАМ: https-dns-proxy восстанавливает dnsmasq из СВОИХ backup-ключей (doh_backup_*) при
 	// каждой остановке/ребуте, даже после того как мы забрали upstream себе — шифрование тихо

@@ -1,25 +1,11 @@
-// gather.uc — сбор фактов о системе для preflight (РОУТЕРНАЯ, импурная часть).
-//
-//   ucode -R gather.uc | ucode -R check.uc        # факты → вердикт гейткипера
-//
-// Импурно: читает /proc, зовёт ubus/uname/df/apk. РАЗБОР вывода — в parse.uc (чисто, под
-// юнит-тестами); здесь только запуск команд и сборка facts-JSON. Проверяется в QEMU, не
-// юнитами — осознанная граница (см. README). Команды недоступны/упали → поле null/false:
-// это безопасное направление гейткипера — «не смог подтвердить» = блокировать, не пропускать.
+// gather.uc — сбор фактов для preflight (импурно; разбор — parse.uc). ucode -R gather.uc | ucode -R check.uc
+// ИНВАРИАНТ: команда недоступна/упала → поле null/false — «не смог подтвердить» = блокировать, не пропускать.
 
-import { popen, readfile } from "fs";
+import { readfile } from "fs";
+import { sh } from "../lib/proc.uc";
 import { default_requirements, full_requirements } from "./preflight.uc";
 import { parse_meminfo, parse_df, parse_arch, parse_board,
          parse_iface_cidr } from "./parse.uc";
-
-// sh(cmd) → stdout строкой (пусто при сбое). Команда идёт через /bin/sh -c (popen).
-function sh(cmd) {
-	let p = popen(cmd, "r");
-	if (!p) return "";
-	let out = p.read("all") ?? "";
-	p.close();
-	return out;
-}
 
 // cmd_rc(cmd) → true, если команда завершилась кодом 0. Вывод глушим, читаем только $?.
 function cmd_rc(cmd) {

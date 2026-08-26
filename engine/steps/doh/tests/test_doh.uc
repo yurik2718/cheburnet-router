@@ -30,18 +30,34 @@ test("сами рулим dnsmasq: создаём секцию config + откл
 });
 
 // --- dnsmasq upstream: свежая система → add нашего локального порта ---
-test("dnsmasq upstream: чистая система → add_list локального порта", () => {
+// ПОРЯДОК upstream'ов значим: первым основной (через туннель), вторым резервный (через WAN).
+// Перепутанный порядок = DoH постоянно уходит мимо туннеля, и это никак не заметно снаружи.
+test("dnsmasq upstream: чистая система → оба порта ПО ПОРЯДКУ + strict-order", () => {
 	let p = build_doh_plan({ hdp_sections: [], servers: [] }, null);
 	deep_eq(p.dnsmasq_ops, [
 		"add_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'",
+		"add_list dhcp.@dnsmasq[0].server='127.0.0.1#5054'",
+		"set dhcp.@dnsmasq[0].strictorder='1'",
 	]);
+});
+
+test("dnsmasq upstream: порядок разошёлся → наши записи переписываются целиком", () => {
+	let p = build_doh_plan({ hdp_sections: [], servers: [ "127.0.0.1#5054", "127.0.0.1#5053" ],
+		options: { strictorder: "1" } }, null);
+	deep_eq(p.dnsmasq_ops, [
+		"del_list dhcp.@dnsmasq[0].server='127.0.0.1#5054'",
+		"del_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'",
+		"add_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'",
+		"add_list dhcp.@dnsmasq[0].server='127.0.0.1#5054'",
+	], "иначе резервный отвечал бы первым и DoH шёл бы мимо туннеля");
 });
 
 // --- идемпотентность upstream: уже настроено → no-op ---
 test("dnsmasq upstream: уже настроено → пустой diff", () => {
 	let p = build_doh_plan({
-		hdp_sections: [ "cheburnet_doh" ],
-		servers: [ "127.0.0.1#5053" ],
+		hdp_sections: [ "cheburnet_doh", "cheburnet_doh_wan" ],
+		servers: [ "127.0.0.1#5053", "127.0.0.1#5054" ],
+		options: { strictorder: "1" },
 	}, null);
 	deep_eq(p.dnsmasq_ops, []);
 });
@@ -50,9 +66,10 @@ test("dnsmasq upstream: уже настроено → пустой diff", () => 
 test("чужой upstream-сервер (не 127.0.0.1#) сохраняется", () => {
 	let p = build_doh_plan({
 		hdp_sections: [],
-		servers: [ "8.8.8.8", "127.0.0.1#5053" ],
+		servers: [ "8.8.8.8", "127.0.0.1#5053", "127.0.0.1#5054" ],
+		options: { strictorder: "1" },
 	}, null);
-	deep_eq(p.dnsmasq_ops, [], "наша уже на месте, чужой 8.8.8.8 не в remove");
+	deep_eq(p.dnsmasq_ops, [], "наши на месте и в порядке, чужой 8.8.8.8 не тронут");
 });
 
 // --- замена дефолтной секции пакета (конфликт по порту) ---
@@ -69,7 +86,8 @@ test("кастомный резолвер заменяет дефолт", () => 
 	});
 	ok(has(p.hdp_setup, "set https-dns-proxy.mullvad.resolver_url='https://dns.mullvad.net/dns-query'"));
 	ok(!has(p.hdp_setup, "set https-dns-proxy.quad9=https-dns-proxy"), "quad9 не появляется");
-	deep_eq(p.dnsmasq_ops, [ "add_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'" ]);
+	deep_eq(p.dnsmasq_ops, [ "add_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'",
+		"set dhcp.@dnsmasq[0].strictorder='1'" ]);
 });
 
 test("резолвер без bootstrap → строки bootstrap_dns нет", () => {
@@ -132,6 +150,50 @@ test("dnsmasq upstream: наш устаревший порт удаляется,
 	ok(has(p.dnsmasq_ops, "del_list dhcp.@dnsmasq[0].server='127.0.0.1#5054'"));
 	ok(has(p.dnsmasq_ops, "add_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'"));
 	ok(!has(p.dnsmasq_ops, "del_list dhcp.@dnsmasq[0].server='8.8.8.8'"), "чужой upstream сохраняем");
+});
+
+// Резервный экземпляр обязан получить СВОЕГО владельца: по нему (и только по нему) firewall
+// уводит его мимо туннеля. Совпали пользователи — правило по uid перестаёт различать экземпляры,
+// и «резервный» путь тихо оказывается тем же самым, что основной.
+test("user/group берутся из записи резолвера, а не хардкодятся", () => {
+	let p = build_doh_plan({ hdp_sections: [], servers: [] }, null);
+	ok(has(p.hdp_setup, "set https-dns-proxy.cheburnet_doh.user='nobody'"));
+	ok(has(p.hdp_setup, "set https-dns-proxy.cheburnet_doh_wan.user='network'"));
+	ok(!has(p.hdp_setup, "set https-dns-proxy.cheburnet_doh_wan.user='nobody'"),
+		"иначе `ip rule uidrange` не отличит резервный экземпляр от основного");
+});
+
+// Служебные перепроверки резервного экземпляра уходят мимо туннеля и видны провайдеру, даже
+// когда резервным никто не пользуется — поэтому они редкие, а у основного остаётся дефолт пакета.
+// Регресс: секции пакета анонимные, и удаление сдвигает индексы. Снёс [0] — бывший [1] стал [0],
+// второй delete промахивается, чужой экземпляр выживает и занимает наш порт 5054, подменяя
+// резервный резолвер на dns.google мимо выбранной фильтрации.
+test("teardown: анонимные секции сносятся ПО УБЫВАНИЮ индекса (иначе одна выживает)", () => {
+	let p = build_doh_plan({ hdp_sections: [ "@https-dns-proxy[0]", "@https-dns-proxy[1]" ],
+		servers: [] }, null);
+	let first = p.hdp_teardown[0], second = p.hdp_teardown[1];
+	eq(first, "delete https-dns-proxy.@https-dns-proxy[1]", "сначала последний индекс");
+	eq(second, "delete https-dns-proxy.@https-dns-proxy[0]");
+});
+
+test("teardown: анонимные идут ДО именованных (индекс считается среди всех секций типа)", () => {
+	let p = build_doh_plan({ hdp_sections: [ "cheburnet_doh", "@https-dns-proxy[1]" ],
+		servers: [] }, null);
+	eq(p.hdp_teardown[0], "delete https-dns-proxy.@https-dns-proxy[1]");
+	ok(index(p.hdp_teardown, "delete https-dns-proxy.cheburnet_doh") > 0);
+});
+
+test("polling_interval ставится ТОЛЬКО резервному экземпляру", () => {
+	let p = build_doh_plan({ hdp_sections: [], servers: [] }, null);
+	ok(has(p.hdp_setup, "set https-dns-proxy.cheburnet_doh_wan.polling_interval='3600'"));
+	ok(index(join("\n", p.hdp_setup), "cheburnet_doh.polling_interval") < 0,
+		"основной экземпляр ходит туннелем — экономить его сигналы не за чем");
+});
+
+test("strict-order не переписывается, если уже стоит (идемпотентность)", () => {
+	let p = build_doh_plan({ hdp_sections: [], servers: [ "127.0.0.1#5053", "127.0.0.1#5054" ],
+		options: { strictorder: "1" } }, null);
+	ok(index(join("\n", p.dnsmasq_ops), "strictorder") < 0);
 });
 
 exit(summary());

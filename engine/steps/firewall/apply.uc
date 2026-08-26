@@ -7,6 +7,7 @@ import { stdin, writefile, unlink } from "fs";
 import { sh, uci_batch } from "../../lib/proc.uc";
 import { build_plan } from "../../routing/routing.uc";
 import { build_firewall_plan } from "./firewall.uc";
+import { wan_user } from "../doh/providers.uc";
 
 function run(cmd) {
 	return int(trim(sh(cmd + " >/dev/null 2>&1; echo $?")));
@@ -19,6 +20,18 @@ let req = json(raw);
 let arg = (length(ARGV) > 0) ? ARGV[0] : "";
 let dry = (arg == "--dry-run");
 let teardown_only = (arg == "--teardown"); // снять наши правила (откат грязного шага оркестратором)
+
+// uid резервного DoH-экземпляра: ИМЯ пользователя знает каталог DoH (единственный источник),
+// НОМЕР — только живая система, поэтому резолвим здесь, на импурной границе. Пользователя нет
+// (чужая сборка) → правило не строим: резервный путь просто не включится, хуже прежнего не станет.
+if (type(req.routing_opts) != "object") req.routing_opts = {};
+if (req.routing_opts.dns_uid == null) {
+	let uid = trim(sh(sprintf("awk -F: '$1==\"%s\"{print $3}' /etc/passwd 2>/dev/null", wan_user())));
+	if (match(uid, /^[0-9]+$/))
+		req.routing_opts.dns_uid = int(uid);
+	else
+		warn(sprintf("firewall: нет пользователя %s — резервный путь DNS не включён\n", wan_user()));
+}
 
 let routing_plan = build_plan(req.domains ?? [], req.routing_opts);
 let plan = build_firewall_plan(routing_plan, req.fw_opts);

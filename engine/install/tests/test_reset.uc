@@ -25,9 +25,16 @@ test("reset: /etc/cheburnet снят целиком, data-plane и туннел�
 	ok(!access(sb.etc), "каталог конфигурации удалён (включая токен и кэш списка)");
 	let log = calls(sb);
 	ok(index(log, "nft") >= 0, "firewall teardown дошёл до nft");
-	ok(index(log, "delete network.awg0") >= 0, "секции AWG-туннеля сняты");
+	ok(index(log, "delete network.awg0=") >= 0 || index(log, "delete network.awg0\n") >= 0,
+		"секция интерфейса AWG снята");
+	// Забытая route-секция = маршрут в несуществующий туннель после сброса, то есть LAN без
+	// интернета при «мы всё вернули как было».
+	ok(index(log, "delete network.awg0_route4lo") >= 0, "half-routes сняты вместе с интерфейсом");
 	ok(index(log, "delete network.singtun") >= 0, "секции reality-туннеля сняты (независимо от протокола)");
 	ok(index(log, "delete dhcp.@dnsmasq[0].noresolv") >= 0, "dnsmasq возвращён к обычному резолву");
+	// Сторож обязан уйти вместе с конфигурацией: оставшийся тик стал бы «чинить» снятый data-plane
+	// на роутере, который человек уже считает чистым.
+	ok(index(readfile(sb.crontab) ?? "", "watchdog/tick.uc") < 0, "cron-запись сторожа снята");
 	cleanup(sb);
 });
 

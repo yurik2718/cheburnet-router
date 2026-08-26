@@ -1,10 +1,6 @@
-// apply.uc — применение Wi-Fi-шага на роутере (импурно, router-side).
-//
-//   echo '{"ssid":"Home","key":"password123"}' | ucode -R apply.uc            # применить
-//   echo '{"ssid":"Home","key":"password123"}' | ucode -R apply.uc --dry-run  # только план
-//
-// Собирает факты (радио есть? какие iface? какой wpad?), строит план чистым ядром (wifi.uc)
-// и применяет через uci batch + `wifi reload`. Логика плана — wifi/tests; импурная часть — QEMU.
+// apply.uc — применение Wi-Fi-шага (импурно): факты (радио, iface, wpad) → план (wifi.uc, тесты:
+// tests/) → `uci batch` + `wifi reload`.
+//   echo '{"ssid":"Home","key":"password123"}' | ucode -R apply.uc [--dry-run]
 
 import { stdin, popen } from "fs";
 import { sh, uci_batch } from "../../lib/proc.uc";
