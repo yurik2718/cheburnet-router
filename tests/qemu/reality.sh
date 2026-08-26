@@ -80,6 +80,16 @@ tar -C "$REPO_ROOT" --exclude='engine/*/tests' --exclude='engine/*/*/tests' \
     --exclude='*README.md' -cf - engine \
     | vm_ssh "tar -C /usr/share/cheburnet -xf -"
 ENG=/usr/share/cheburnet/engine
+# rpcd-обработчик как в пакете: панельные методы гоняем через НАСТОЯЩИЙ rpcd/ubus, а не вызовом
+# скрипта напрямую. ШРАМ: stdout шага попадал в JSON-ответ, прямой вызов этого не видел.
+vm_ssh "mkdir -p /usr/libexec/rpcd /usr/share/rpcd/acl.d"
+vm_scp "$REPO_ROOT/package/cheburnet/files/rpcd-cheburnet.sh" "/usr/libexec/rpcd/cheburnet"
+vm_scp "$REPO_ROOT/engine/ubus/rpcd-acl.json" "/usr/share/rpcd/acl.d/cheburnet.json"
+vm_ssh "chmod +x /usr/libexec/rpcd/cheburnet && /etc/init.d/rpcd reload && sleep 1 && ubus list cheburnet >/dev/null" \
+    || { echo "  ✗ объект cheburnet не появился на шине ubus"; vm_ssh "logread | grep -i rpcd | tail -5"; exit 1; }
+# rpc <метод> '<json>' — через ubus; ответ ubus печатает многострочно, поэтому сравниваем без пробелов.
+rpc() { vm_ssh "ubus call cheburnet $1 '$2'"; }
+flat() { tr -d '\n\t ' ; }
 
 # ─── 1. applying singbox шаг: конфиг + netifd-маршрут + TUN ───────────────────
 # Сервер-заглушка 10.0.2.99:8443 заведомо недостижим (герметично). Нам важна ОБВЯЗКА,
@@ -167,9 +177,9 @@ vm_ssh "mkdir -p /tmp/cheburnet /etc/cheburnet && printf '%s' '{\"protocol\":\"r
 vm_ssh "echo '{\"domains\":[\"example.com\"],\"routing_opts\":{\"wan_if\":\"$WAN_DEV\",\"wan_gw\":\"$WAN_GW\",\"ipv6\":false},\"fw_opts\":{\"tunnel_if\":\"singtun0\"}}' | ucode -R $ENG/steps/firewall/apply.uc" >/dev/null \
     || { echo "  ✗ firewall-шаг не применился"; exit 1; }
 for mode in travel home; do
-    OUT="$(vm_ssh "printf '%s' '{\"mode\":\"$mode\"}' | ucode -R $ENG/ubus/rpcd-cheburnet call set_mode")"
-    printf '%s\n' "$OUT" | grep -q '"status":[ ]*"ok"' \
-        || { echo "  ✗ set_mode $mode не ответил ok: $OUT"; vm_ssh "logread | tail -20"; exit 1; }
+    OUT="$(rpc set_mode "{\"mode\":\"$mode\"}" | flat)"
+    printf '%s\n' "$OUT" | grep -q '"status":"ok"' \
+        || { echo "  ✗ set_mode $mode через ubus не ответил ok: $OUT"; vm_ssh "logread | tail -20"; exit 1; }
     vm_ssh "uci -q get firewall.cheburnet_vpn.network | grep -qw singtun0" \
         || { echo "  ✗ после set_mode $mode NAT-зона смотрит не на singtun0: $(vm_ssh 'uci -q get firewall.cheburnet_vpn.network')"; exit 1; }
     # В home хук сверяет WAN мимо ИМЕННО нашего туннеля; в travel интерфейс ему не нужен —

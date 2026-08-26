@@ -63,6 +63,12 @@ const REGISTRY = [
 	{ name: "resume_protection", access: "write", auth: "admin", token: false, args: [] },
 	// Источник community-списка — решение проекта (list/list.uc DEFAULT_SOURCE), не настройка.
 	{ name: "update_list", access: "write", auth: "admin", token: false, args: [] },
+	// Свой список доменов прямого доступа — из панели, без переустановки: DNS-шаг переприменяется
+	// на месте. Чтение тоже admin: список говорит о привычках дома, соседу по LAN не отдаём.
+	{ name: "get_domains", access: "read",  auth: "admin", token: false, args: [] },
+	{ name: "set_domains", access: "write", auth: "admin", token: false, args: [
+		{ name: "domains", type: "array", required: true },
+	] },
 	{ name: "service_restart", access: "write", auth: "admin", token: false, args: [
 		// сервисы data-plane (без podkop/sing-box; adblock убран — фильтрация через DNS)
 		{ name: "service", type: "string", required: true, enum: [ "vpn", "dns", "doh" ] },

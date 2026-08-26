@@ -35,6 +35,8 @@
 | `install_cancel` | write | anon + **токен** | прервать установку: kill process-group → дождаться смерти → маркер `cancelled` → откат через `run.uc --rollback` |
 | `set_mode` | write | admin | переключить HOME/TRAVEL — переприменить mode-зависимые шаги (dns+firewall) |
 | `update_list` | write | admin | `list/fetch.uc` свежий community-список → переприменить dns |
+| `get_domains` | read | admin | свой список доменов прямого доступа (admin: говорит о привычках дома) |
+| `set_domains` | write | admin | заменить свой список → `list/assemble.uc` (мусор → `rejected`) → переприменить dns; install.json — после успеха |
 | `service_restart` | write | admin | перезапуск сервиса: `vpn` (ifdown/ifup awg0) / `dns` / `doh` |
 | `set_dns_provider` | write | admin | сменить DNS-провайдера (= уровень фильтрации) — переприменить `steps/doh` |
 | `replace_awg_conf` | write | admin | замена AWG-конфига: sync-валидация → фон `install/replace_vpn.uc` (авто-rollback) |

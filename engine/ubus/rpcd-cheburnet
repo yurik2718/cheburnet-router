@@ -102,14 +102,26 @@ function imported_text() {
 	return readfile(ETC_CHEBURNET + "/direct-list") ?? "";
 }
 
-// assemble_domains(user) — финальный direct-список: user + community-кэш, через чистое ядро
-// list/assemble.uc (валидация/дедуп там). Возврат — массив доменов (пустой при сбое: fail-safe,
-// промах → трафик в туннель).
-function assemble_domains(user) {
+// assemble_result(user) → { domains, rejected } — финальный direct-список: user + community-кэш,
+// через чистое ядро list/assemble.uc (валидация/дедуп там). Сбой → пусто (fail-safe: промах →
+// трафик в туннель). rejected — что отброшено и почему, чтобы панель назвала это человеку.
+function assemble_result(user) {
 	let req = sprintf("%J", { user: user ?? [], imported_text: imported_text() });
 	let out = sh(sprintf("printf '%%s' %s | %s", shellquote(req), engine_cli("list/assemble.uc")));
 	let r = (substr(trim(out), 0, 1) == "{") ? json(out) : {};
-	return (type(r.domains) == "array") ? r.domains : [];
+	return { domains: (type(r.domains) == "array") ? r.domains : [],
+	         rejected: (type(r.rejected) == "array") ? r.rejected : [] };
+}
+function assemble_domains(user) {
+	return assemble_result(user).domains;
+}
+
+// run_step(cmd, text) → код выхода шага. stdout шага — В НИКУДА: rpcd читает наш stdout как
+// ЕДИНСТВЕННЫЙ JSON-ответ, и любая строка шага перед ним («delete dhcp…», «dns: применено»)
+// делала ответ невалидным — панель получала INVALID_ARGUMENT вместо результата (qemu-emergency,
+// 2026-08-26). stderr оставляем: его ловит logread.
+function run_step(cmd, text) {
+	return run_stdin(cmd + " >/dev/null", text);
 }
 
 // reapply_dns(cfg) — переприменить DNS-шаг его же apply.uc (идемпотентно). Firewall так НЕ
@@ -117,8 +129,9 @@ function assemble_domains(user) {
 // протоколу) — собственная копия здесь однажды пересобрала NAT-зону Full-тира под awg0.
 function reapply_dns(cfg) {
 	let payload = sprintf("%J", { domains: cfg.domains, routing_opts: cfg.routing_opts });
-	return run_stdin(engine_cli("steps/dns/apply.uc"), payload);
+	return run_step(engine_cli("steps/dns/apply.uc"), payload);
 }
+
 
 // Человеческое имя протокола для сообщений об ошибках (панель показывает их как есть).
 const PROTO_NAMES = { awg: "AmneziaWG", reality: "VLESS+Reality", hysteria2: "Hysteria2" };
@@ -479,6 +492,48 @@ function m_update_list(v) {
 	respond({ status: "ok", direct_domains: length(cfg.domains) });
 }
 
+// Свой список доменов из панели. Граница доверия: массив строк разумной длины; что из них
+// домен — решает list/assemble.uc (мусор → rejected, не ошибка). install.json отражает
+// ПРИМЕНЁННОЕ: пишем после успешного DNS-шага, провал оставляет прежний список.
+const DOMAINS_MAX = 1000;
+function m_get_domains() {
+	if (!access(CFG_FILE))
+		respond(make_error("роутер не настроен — списка ещё нет"));
+	respond({ status: "ok", user_domains: load_cfg().user_domains });
+}
+
+function m_set_domains(v) {
+	if (pid_alive())
+		respond(make_error("операция уже выполняется"));
+	if (!access(CFG_FILE))
+		respond(make_error("роутер не настроен — списку не к чему применяться"));
+	if (length(v.domains) > DOMAINS_MAX)
+		respond(make_error(sprintf("слишком длинный список: больше %d записей", DOMAINS_MAX)));
+	let user = [];
+	for (let i = 0; i < length(v.domains); i++) {
+		let d = v.domains[i];
+		if (type(d) != "string" || length(d) > 253)
+			respond(make_error("каждая запись списка — строка не длиннее 253 символов"));
+		d = trim(d);
+		if (length(d) > 0) push(user, d);
+	}
+	let cfg = load_cfg();
+	let asm = assemble_result(user);
+	let next = load_cfg();
+	next.user_domains = user;
+	next.domains = asm.domains;
+	let rc = reapply_dns(next);
+	if (rc != 0)
+		respond(make_error("список не применился — прежний оставлен (см. logread)", { dns: rc }));
+	save_cfg(next);
+	// Панели — только СВОИ отброшенные записи: мусор из community-кэша не её дело.
+	let rejected = [];
+	for (let i = 0; i < length(asm.rejected); i++)
+		if (index(user, asm.rejected[i].raw) >= 0) push(rejected, asm.rejected[i].raw);
+	respond({ status: "ok", user_domains: length(user), direct_domains: length(asm.domains),
+	          rejected: rejected, was: length(cfg.user_domains) });
+}
+
 function m_check_lan_conflict() {
 	// Факты собирает тот же gather, что у preflight (lan_cidr/wan_cidr из ubus network.*);
 	// детект и подбор замены — чистые cidr_overlap/suggest_lan (под юнит-тестами).
@@ -598,7 +653,7 @@ function m_set_dns_provider(v) {
 		respond(make_error("операция уже выполняется"));
 	// Сменить DNS-провайдера (= уровень фильтрации). Переприменить doh-шаг с новым id
 	// (идемпотентно: та же секция cheburnet_doh переписывается) и сохранить в конфигурацию.
-	let rc = run_stdin(engine_cli("steps/doh/apply.uc"), sprintf("%J", { provider: v.provider }));
+	let rc = run_step(engine_cli("steps/doh/apply.uc"), sprintf("%J", { provider: v.provider }));
 	if (rc != 0)
 		respond(make_error("не удалось сменить DNS-провайдера (см. logread)", { code: rc }));
 	let cfg = load_cfg();
@@ -822,6 +877,8 @@ else if (method == "install_progress")      m_install_progress();
 else if (method == "install_cancel")        m_install_cancel(v);
 else if (method == "set_mode")              m_set_mode(v);
 else if (method == "update_list")           m_update_list(v);
+else if (method == "get_domains")           m_get_domains();
+else if (method == "set_domains")           m_set_domains(v);
 else if (method == "service_restart")       m_service_restart(v);
 else if (method == "pause_protection")      toggle_protection(false);
 else if (method == "resume_protection")     toggle_protection(true);

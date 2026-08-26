@@ -137,6 +137,17 @@ test("validate: enum mode — только home|travel", () => {
 	eq(r.error, "mode must be one of: home, travel", "сообщение enum");
 });
 
+test("validate: set_domains — массив обязателен; get_domains — без аргументов", () => {
+	eq(validate_request("set_domains", {}).ok, false, "без domains → ошибка");
+	eq(validate_request("set_domains", { domains: "ru" }).ok, false, "строка вместо массива → ошибка");
+	eq(validate_request("set_domains", { domains: [] }).ok, true, "пустой список — законно (всё в туннель)");
+	eq(validate_request("get_domains", {}).ok, true);
+	let s = acl_split();
+	ok(index(s.admin.write, "set_domains") >= 0 && index(s.unauth.write, "set_domains") < 0, "запись — только admin");
+	ok(index(s.admin.read, "get_domains") >= 0 && index(s.unauth.read, "get_domains") < 0,
+		"чтение тоже admin: список говорит о привычках дома");
+});
+
 test("validate: update_list — без аргументов; источник списка — решение проекта, не настройка", () => {
 	let r = validate_request("update_list", { url: "https://e/x" });
 	eq(r.ok, true);
@@ -248,7 +259,7 @@ test("acl_split: тиры выведены из реестра", () => {
 	ok(index(s.admin.write, "install") >= 0, "install тоже доступен admin");
 	ok(index(s.admin.write, "service_restart") >= 0, "service_restart в admin write");
 	ok(index(s.admin.write, "factory_reset") >= 0, "factory_reset в admin write");
-	deep_eq(s.admin.read, [ "preflight", "status", "check_lan_conflict", "install_progress", "diagnostics" ],
+	deep_eq(s.admin.read, [ "preflight", "status", "check_lan_conflict", "install_progress", "get_domains", "diagnostics" ],
 		"admin read = все read");
 	// install_token — write, а не read: метод ВЫПУСКАЕТ токен, если его нет. Классифицировать
 	// создание состояния как чтение было бы нечестно по отношению к ACL.

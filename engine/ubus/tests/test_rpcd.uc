@@ -490,6 +490,68 @@ test("set_mode на ненастроенном роутере → ошибка, 
 	ok(!access(SB + "/reapply-seen.json"), "reapply.uc не вызывался");
 });
 
+// === set_domains / get_domains: свой список из панели без переустановки ===
+// Стаб-движок: настоящий list/assemble.uc (валидация — его работа), dns-шаг пишет payload и
+// выходит с заданным кодом.
+function stub_engine_domains(dns_rc) {
+	let dir = SB + "/engine-d";
+	// list/assemble.uc тянет ../routing/routing.uc — копируем оба модуля целиком.
+	sh(sprintf("rm -rf %s; mkdir -p %s/steps/dns; cp -r %s/../../list %s/list; cp -r %s/../../routing %s/routing",
+		shq(dir), shq(dir), shq(HERE), shq(dir), shq(HERE), shq(dir)));
+	writefile(dir + "/steps/dns/apply.uc",
+		sprintf("import { stdin, writefile } from \"fs\";\nwritefile(%s, stdin.read(\"all\") ?? \"\");\nexit(%d);\n",
+			shq(SB + "/dns-payload.json"), dns_rc));
+	return dir;
+}
+
+test("set_domains: DNS-шаг получает user + импорт, install.json обновлён, мусор назван", () => {
+	reset_sb();
+	sh(sprintf("rm -f %s/dns-payload.json", shq(SB)));
+	put_cfg({ protocol: "awg", routing_opts: { mode: "home", wan_if: "eth0" },
+	          user_domains: [ "ru" ], domains: [ "ru" ] });
+	writefile(ETC + "/direct-list", "imported.example\n");
+	let r = rpc("set_domains", { domains: [ "Example.COM ", "bad..name", "", "ru" ] }, { engine: stub_engine_domains(0) });
+	eq(r.status, "ok", sprintf("ответ: %J", r));
+	eq(r.user_domains, 3, "пустые строки отброшены до счёта");
+	eq(r.direct_domains, 3, "example.com + ru + imported.example; bad..name — нет");
+	eq(join(",", r.rejected), "bad..name", "панели названы ТОЛЬКО свои отброшенные записи");
+	let dns = json(readfile(SB + "/dns-payload.json"));
+	ok(index(dns.domains, "example.com") >= 0 && index(dns.domains, "imported.example") >= 0,
+		"в шаг ушёл полный список: свои (нормализованные) + импорт");
+	let cfg = json(readfile(ETC + "/install.json"));
+	eq(join(",", cfg.user_domains), "Example.COM,bad..name,ru", "свой список хранится как ввёл человек (trim), валидация — при сборке");
+	eq(length(cfg.domains), 3);
+	eq(cfg.routing_opts.mode, "home", "остальная конфигурация не тронута");
+});
+
+test("set_domains: DNS-шаг упал → прежний список остался, ошибка честная", () => {
+	reset_sb();
+	put_cfg({ protocol: "awg", routing_opts: { mode: "home" }, user_domains: [ "ru" ], domains: [ "ru" ] });
+	let r = rpc("set_domains", { domains: [ "example.com" ] }, { engine: stub_engine_domains(1) });
+	err_has(r, "прежний оставлен", "set_domains");
+	eq(join(",", json(readfile(ETC + "/install.json")).user_domains), "ru", "install.json отражает ПРИМЕНЁННОЕ");
+});
+
+test("set_domains: граница доверия — не строка / слишком длинно / нет конфигурации", () => {
+	reset_sb();
+	err_has(rpc("set_domains", { domains: [ "ru" ] }, { engine: stub_engine_domains(0) }), "не настроен", "без install.json");
+	put_cfg({ protocol: "awg", routing_opts: {}, user_domains: [], domains: [] });
+	err_has(rpc("set_domains", { domains: [ 5 ] }, { engine: stub_engine_domains(0) }), "строка", "число в списке");
+	let many = [];
+	for (let i = 0; i < 1001; i++) push(many, sprintf("d%d.example", i));
+	err_has(rpc("set_domains", { domains: many }, { engine: stub_engine_domains(0) }), "слишком длинный", "лимит записей");
+	ok(!access(SB + "/dns-payload.json") || length(readfile(SB + "/dns-payload.json")) == 0 ||
+	   index(readfile(SB + "/dns-payload.json"), "d1000.example") < 0, "отказ ДО применения");
+});
+
+test("get_domains: отдаёт свой список; без конфигурации — ошибка", () => {
+	reset_sb();
+	err_has(rpc("get_domains", {}), "не настроен", "get_domains");
+	put_cfg({ protocol: "awg", routing_opts: {}, user_domains: [ "ru", "example.com" ], domains: [] });
+	let r = rpc("get_domains", {});
+	eq(join(",", r.user_domains), "ru,example.com");
+});
+
 // === check_lan_conflict: на хосте фактов нет → честное «проверять нечего» ===
 
 test("check_lan_conflict без фактов сети → conflict=false с причиной", () => {

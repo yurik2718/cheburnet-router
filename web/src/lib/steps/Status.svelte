@@ -3,7 +3,7 @@
   import { cheburnet, login, isLoggedIn, logout, isAccessDenied } from '../ubus.js';
   import { hs, FORCED_LABELS, heroKind, tunnelFallback, switchTargets, tunnelRowText,
            explainFullTierFail, fullMissingText, protocolInfo, checkConf, BRUTAL_WARNING,
-           withDeclaredSpeed, SPEED_DEFAULTS, SUPPORT } from '../logic.js';
+           withDeclaredSpeed, SPEED_DEFAULTS, SUPPORT, parseDomains } from '../logic.js';
   import Card from '../ui/Card.svelte';
   import Button from '../ui/Button.svelte';
   import Input from '../ui/Input.svelte';
@@ -133,6 +133,7 @@
       loginAttempts = 0;
       actionScope = 'manage';
       action = 'Вход выполнен — повторите действие.';
+      loadDomains();
     } catch (e) {
       loginAttempts += 1;
       loginPass = '';
@@ -150,6 +151,27 @@
   }
 
   const setMode = (mode) => admin(`Режим ${mode}`, () => cheburnet('set_mode', { mode }));
+
+  // Свой список сайтов напрямую — правится здесь, без мастера и переустановки (set_domains
+  // переприменяет только DNS-шаг). Список читается после входа: он говорит о привычках дома,
+  // поэтому движок отдаёт его только admin-сессии.
+  let userDomainsText = $state('');
+  let domainsLoaded = $state(false);
+  async function loadDomains() {
+    try {
+      const r = await cheburnet('get_domains');
+      userDomainsText = (r.user_domains ?? []).join('\n');
+      domainsLoaded = true;
+    } catch { /* не вошли или роутер не настроен — поле покажет подсказку */ }
+  }
+  const saveDomains = () =>
+    admin('Список сайтов', async () => {
+      const r = await cheburnet('set_domains', { domains: parseDomains(userDomainsText) });
+      const rej = r.rejected ?? [];
+      action = `Сохранено: своих сайтов ${r.user_domains}, напрямую всего ${r.direct_domains}.`
+        + (rej.length ? ` Не похожи на домены и пропущены: ${rej.join(', ')}.` : '');
+      await loadDomains();
+    });
   const updateList = () =>
     admin('Обновление списка', async () => {
       const r = await cheburnet('update_list');
@@ -360,6 +382,7 @@
   }
 
   refresh();
+  if (loggedIn) loadDomains();
   // 15 с, не чаще: каждый опрос — это спавн rpcd-скрипта + shell-батч на роутере (слабое железо).
   timer = setInterval(refresh, 15000);
   onDestroy(() => {
@@ -582,7 +605,7 @@
     {#if s.installed && s.direct_domains === 0}
       <p class="banner">
         Список «сайты напрямую» пуст — весь трафик идёт через VPN (безопасно, но медленнее).
-        Добавьте сайты в мастере или подтяните готовый список кнопкой ниже.
+        Впишите свои сайты в поле ниже или подтяните готовый список.
       </p>
     {:else if s.installed && !s.direct_list_loaded}
       <!-- Необязательный community-список не подтянут — это НЕ проблема (свои домены работают).
@@ -650,12 +673,25 @@
               onclick={() => s.mode !== 'travel' && setMode('travel')}>В поездке</button>
     </div>
     <p class="muted small">Дома — сайты из списка идут напрямую. В поездке — весь трафик через туннель.</p>
-    <!-- Подпись ПЕРЕД кнопкой: сразу под кнопками печатается результат действия (actionNote), и
-         вставленный между ними текст отодвигал бы его от того, что человек только что нажал.
-         Отступ обязателен — иначе подпись слипается с абзацем про режимы и читается как его хвост. -->
-    <p class="muted small action-hint">Подтянуть готовый список популярных сайтов прямого доступа.</p>
+    <!-- Свой список — главная настройка продукта, поэтому она здесь, а не в мастере: поменять
+         сайт не должно стоить переустановки. Применяется одним DNS-шагом, без разрыва туннеля. -->
+    <label class="domains">
+      <span>Сайты напрямую — ваш список</span>
+      {#if loggedIn && domainsLoaded}
+        <textarea bind:value={userDomainsText} rows="4" disabled={busy}
+                  placeholder="ru&#10;example.com" spellcheck="false"></textarea>
+      {:else}
+        <textarea rows="4" disabled placeholder={loggedIn ? 'Загружаю список…' : 'Войдите, чтобы увидеть и изменить список'}></textarea>
+      {/if}
+      <small class="muted">Зона (<code>ru</code>) покрывает все сайты в ней; отдельные — своей строкой.
+        Остальное — через туннель. Промах безопасен: сайт не в списке — уйдёт через VPN.</small>
+    </label>
+    <!-- Подпись ПЕРЕД кнопками: сразу под ними печатается результат действия (actionNote), и
+         вставленный между ними текст отодвигал бы его от того, что человек только что нажал. -->
+    <p class="muted small action-hint">«Обновить готовый список» подтягивает community-список популярных сайтов — он добавляется к вашему.</p>
     <div class="row">
-      <Button disabled={busy} onclick={updateList}>Обновить список сайтов</Button>
+      <Button disabled={busy || !loggedIn || !domainsLoaded} onclick={saveDomains}>Сохранить список</Button>
+      <Button disabled={busy} onclick={updateList}>Обновить готовый список</Button>
     </div>
     {@render actionNote('manage')}
 

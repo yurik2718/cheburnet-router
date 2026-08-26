@@ -53,6 +53,16 @@ vm_ssh "mkdir -p /usr/share/cheburnet /etc/cheburnet"
 tar -C "$REPO_ROOT" --exclude='engine/*/tests' --exclude='engine/*/*/tests' --exclude='*README.md' \
     -cf - engine | vm_ssh "tar -C /usr/share/cheburnet -xf -"
 ENGINE=/usr/share/cheburnet/engine
+# rpcd-обработчик как в пакете: панельные методы гоняем через НАСТОЯЩИЙ rpcd/ubus, а не вызовом
+# скрипта напрямую. ШРАМ: stdout шага попадал в JSON-ответ, прямой вызов этого не видел.
+vm_ssh "mkdir -p /usr/libexec/rpcd /usr/share/rpcd/acl.d"
+vm_scp "$REPO_ROOT/package/cheburnet/files/rpcd-cheburnet.sh" "/usr/libexec/rpcd/cheburnet"
+vm_scp "$REPO_ROOT/engine/ubus/rpcd-acl.json" "/usr/share/rpcd/acl.d/cheburnet.json"
+vm_ssh "chmod +x /usr/libexec/rpcd/cheburnet && /etc/init.d/rpcd reload && sleep 1 && ubus list cheburnet >/dev/null" \
+    || { echo "  ✗ объект cheburnet не появился на шине ubus"; vm_ssh "logread | grep -i rpcd | tail -5"; exit 1; }
+# rpc <метод> '<json>' — через ubus; ответ ubus печатает многострочно, поэтому сравниваем без пробелов.
+rpc() { vm_ssh "ubus call cheburnet $1 '$2'"; }
+flat() { tr -d '\n\t ' ; }
 
 vm_start_firewall
 
@@ -189,10 +199,9 @@ echo "  ✓ маршрут, kill-switch и флаг вернулись; траф
 # travel нет по замыслу, — и переприменял firewall на каждый ifup. Здесь: set_mode через rpcd,
 # как его зовёт панель, и оба артефакта после него.
 echo "→ ПРОВЕРКА 6: set_mode через rpcd — travel и обратно, хук гейтится по режиму"
-rpc_mode() { vm_ssh "printf '%s' '{\"mode\":\"$1\"}' | ucode -R $ENGINE/ubus/rpcd-cheburnet call set_mode"; }
-OUT="$(rpc_mode travel)"
-printf '%s\n' "$OUT" | grep -q '"status":[ ]*"ok"' \
-    || { echo "  ✗ set_mode travel не ответил ok: $OUT"; vm_ssh "logread | tail -20"; exit 1; }
+OUT="$(rpc set_mode '{"mode":"travel"}' | flat)"
+printf '%s\n' "$OUT" | grep -q '"status":"ok"' \
+    || { echo "  ✗ set_mode travel через ubus не ответил ok: $OUT"; vm_ssh "logread | tail -20"; exit 1; }
 vm_ssh "! ip rule show | grep -qE 'fwmark|uidrange'" \
     || { echo "  ✗ в travel остались правила направления — «поездка» врёт"; vm_ssh "ip rule show"; exit 1; }
 vm_ssh "nft list chain inet fw4 cheburnet_ks 2>/dev/null | grep -q 'ct state new drop'" \
@@ -204,9 +213,9 @@ vm_ssh "grep -q '\"mode\":[[:space:]]*\"travel\"' /etc/cheburnet/install.json" \
 # Хук в travel при целом kill-switch обязан выйти сразу — reapply.uc не зовётся (иначе шторм на ifup).
 vm_ssh "ACTION=ifup INTERFACE=lan sh /etc/hotplug.d/iface/99-cheburnet"
 inv_rc || { echo "  ✗ чек-лист красный в travel после хука"; inv; exit 1; }
-OUT="$(rpc_mode home)"
-printf '%s\n' "$OUT" | grep -q '"status":[ ]*"ok"' \
-    || { echo "  ✗ set_mode home не ответил ok: $OUT"; exit 1; }
+OUT="$(rpc set_mode '{"mode":"home"}' | flat)"
+printf '%s\n' "$OUT" | grep -q '"status":"ok"' \
+    || { echo "  ✗ set_mode home через ubus не ответил ok: $OUT"; exit 1; }
 vm_ssh "ip rule show | grep -q 'fwmark 0x1 lookup 100'" \
     || { echo "  ✗ правило направления не вернулось после set_mode home"; vm_ssh "ip rule show"; exit 1; }
 vm_ssh "ip route show table 100 | grep -q \"default.* dev $WAN_DEV\"" \
@@ -215,6 +224,27 @@ vm_ssh "grep -q 'grep -q fwmark' /etc/hotplug.d/iface/99-cheburnet" \
     || { echo "  ✗ хук в home не гейтится по правилу направления"; exit 1; }
 inv_rc || { echo "  ✗ чек-лист красный после возврата в home"; inv; exit 1; }
 echo "  ✓ set_mode travel/home через rpcd: правила, kill-switch, хук и install.json сходятся"
+
+# ─── 7. Свой список сайтов правится из панели без переустановки ──────────────
+echo "→ ПРОВЕРКА 7: set_domains через rpcd — DNS-шаг переприменён, мусор назван, туннель не тронут"
+OUT="$(rpc set_domains '{"domains":["example.org","bad..name","ru"]}' | flat)"
+printf '%s\n' "$OUT" | grep -q '"status":"ok"' \
+    || { echo "  ✗ set_domains через ubus не ответил ok: $OUT"; vm_ssh "logread | tail -20"; exit 1; }
+printf '%s\n' "$OUT" | grep -q '"rejected":\["bad..name"\]' \
+    || { echo "  ✗ мусорная запись не названа в rejected: $OUT"; exit 1; }
+vm_ssh "uci -q get dhcp.cheburnet_dns4.domain | grep -qw example.org" \
+    || { echo "  ✗ новый домен не доехал до dnsmasq: $(vm_ssh 'uci -q get dhcp.cheburnet_dns4.domain')"; exit 1; }
+vm_ssh "uci -q get dhcp.cheburnet_dns4.domain | grep -qw example.com && exit 1; exit 0" \
+    || { echo "  ✗ старый домен остался — список не заменён, а дописан"; exit 1; }
+vm_ssh "grep -q 'example.org' /etc/cheburnet/install.json" \
+    || { echo "  ✗ список не сохранён в install.json"; exit 1; }
+vm_ssh "ip route show | grep -q '0.0.0.0/1 dev $TUN'" \
+    || { echo "  ✗ смена списка тронула маршрут туннеля"; exit 1; }
+OUT="$(rpc get_domains '{}' | flat)"
+printf '%s\n' "$OUT" | grep -q 'example.org' \
+    || { echo "  ✗ get_domains не вернул сохранённый список: $OUT"; exit 1; }
+inv_rc || { echo "  ✗ чек-лист красный после смены списка"; inv; exit 1; }
+echo "  ✓ список заменён на месте: dnsmasq, install.json и get_domains сходятся, мусор назван"
 
 echo
 printf '\033[32m✓ emergency: аварийный режим возвращает интернет, обратим и не отменяется за спиной человека\033[0m\n'

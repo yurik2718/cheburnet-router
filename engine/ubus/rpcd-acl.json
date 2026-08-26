@@ -30,6 +30,7 @@
                     "status",
                     "check_lan_conflict",
                     "install_progress",
+                    "get_domains",
                     "diagnostics"
                 ]
             }
@@ -44,6 +45,7 @@
                     "pause_protection",
                     "resume_protection",
                     "update_list",
+                    "set_domains",
                     "service_restart",
                     "set_dns_provider",
                     "install_full_tier",
