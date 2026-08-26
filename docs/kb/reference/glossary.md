@@ -61,12 +61,12 @@ updated: 2026-06-08
 - **Preflight** — проверка пригодности железа перед установкой. → [[reliability]]
 - **Идемпотентность** — повторный запуск без вреда. → [[reliability]]
 - **ADR** — Architecture Decision Record, запись решения и причины. → `decisions/`
-- **MOC** — Map of Content, заметка-хаб со ссылками. → [[Home]]
+- **MOC** — Map of Content, заметка-хаб со ссылками. → [[README|карта знаний]]
 - **Strangler-fig** — миграция по кускам без big-bang rewrite (так проект переехал с bash-версии). → [docs/architecture.md](../../architecture.md)
 - **Fail-safe** — сбой ведёт в безопасное состояние (у нас — в туннель, не в утечку).
   → [[split-routing]]
 
 ## Дальше
 
-- [[Home]] — карта знаний
+- [[README|Карта знаний]]
 - [[conventions]] — как устроен vault

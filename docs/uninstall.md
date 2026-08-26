@@ -32,7 +32,7 @@ ucode -R /usr/share/cheburnet/engine/install/reset.uc
 
 ```sh
 apk del cheburnet
-apk del cheburnet-full   # только если ставились запасные туннели (VLESS+Reality / Hysteria2)
+apk del sing-box-tiny    # только если ставились запасные туннели (VLESS+Reality / Hysteria2)
 ```
 
 ## 3. Зависимости — по желанию
@@ -64,6 +64,8 @@ ls /etc/cheburnet                       # «No such file» = конфигура�
 ls /etc/nftables.d/10-cheburnet.nft     # «No such file» = правила фаервола сняты
 ip rule show                            # правил с fwmark от cheburnet быть не должно
 nft list ruleset | grep -c cheburnet    # 0 (цепочки cheburnet_mark / cheburnet_ks)
+grep -c cheburnet /etc/crontabs/root    # 0 = cron-запись сторожа снята
+ls /etc/hotplug.d/iface/99-cheburnet    # «No such file» = хук восстановления снят
 ```
 
 ## Если пакет уже удалён, а настройка осталась
@@ -79,8 +81,10 @@ apk del cheburnet
 ```
 
 Совсем без сети на роутере остаётся ручной путь — снять секции туннеля в `/etc/config/network`,
-секции `https-dns-proxy`, наши `ipset`-секции и `noresolv` в `/etc/config/dhcp`, затем
-`/etc/init.d/network restart`. Что именно принадлежит cheburnet — перечислено в
+секции `https-dns-proxy`, наши `ipset`-секции, `server 127.0.0.1#…`, `noresolv` и `strictorder` в
+`/etc/config/dhcp`, `sing-box.main` в `/etc/config/sing-box` (если был), строку `watchdog/tick.uc`
+из `/etc/crontabs/root`, файлы `/etc/nftables.d/10-cheburnet.nft` и
+`/etc/hotplug.d/iface/99-cheburnet`, затем `/etc/init.d/network restart; fw4 reload`. Что именно принадлежит cheburnet — перечислено в
 [Troubleshooting](kb/reference/troubleshooting.md#сброс-настройки-что-снимается-а-что-остаётся).
 
 ---

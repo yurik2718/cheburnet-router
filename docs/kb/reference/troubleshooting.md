@@ -2,7 +2,7 @@
 title: Troubleshooting — куда смотреть
 tags: [reference]
 aliases: [troubleshooting, диагностика, отладка]
-updated: 2026-06-08
+updated: 2026-08-22
 ---
 
 # Troubleshooting — куда смотреть
@@ -14,16 +14,27 @@ updated: 2026-06-08
 ## Первые три команды
 
 ```bash
-vpn-mode status                      # режим (HOME/TRAVEL) + общее состояние
-awg show awg0 | grep handshake       # туннель живой? «N seconds ago» < 2 мин = ок
-logread | tail -200                  # что случилось недавно
+ucode -R /usr/share/cheburnet/engine/invariants/gather.uc \
+  | ucode -R /usr/share/cheburnet/engine/invariants/check.uc   # чек-лист «что на месте» + чем чинить
+ubus call cheburnet status           # то, что видит панель: режим, туннель, DNS
+logread | tail -200                  # что случилось недавно (сторож пишет только про поломки)
 ```
 
 ## По симптому
 
 ### «Нет интернета вообще»
 1. `awg show awg0` — есть свежий handshake? Нет → проблема с [[amneziawg|туннелем]]/конфигом.
-2. [[kill-switch]] работает как задумано: туннель упал → непрямой трафик дропается (не утечка).
+2. **Handshake свежий, панель зелёная, а интернета нет** — спроси у ядра, кто владеет дефолтом:
+   ```bash
+   ip route get 1.1.1.1        # ожидается dev awg0 (или singtun0), а НЕ dev <WAN>
+   ip route show | grep '/1 '  # half-routes 0.0.0.0/1 + 128.0.0.0/1 через туннель — на месте?
+   ```
+   Уехало на WAN → не-direct трафик уходит без метки и его режет [[kill-switch]]. Вернуть
+   (эта же команда переводит установку со старой схемы маршрута на half-routes, см. [[reliability]]):
+   ```bash
+   ucode -R /usr/share/cheburnet/engine/steps/vpn/apply.uc --arm
+   ```
+3. [[kill-switch]] работает как задумано: туннель упал → непрямой трафик дропается (не утечка).
    Это **не баг**, а защита. Чини туннель.
 
 ### «Сайт из direct-списка идёт через VPN, а должен напрямую»
@@ -51,6 +62,35 @@ ucode -R /usr/share/cheburnet/engine/install/reapply.uc
 перезагрузку, поэтому после каждого ребута direct-домены уходили в туннель при полностью зелёной
 панели. Восстановление держит hotplug-хук `/etc/hotplug.d/iface/99-cheburnet` — если файла нет,
 переприменение настройки из панели (смена режима) вернёт и его.
+
+### «Ничего не резолвится» / «интернет пропал совсем»
+Сначала выясни, жив ли резолв и какой цепочкой он идёт:
+```bash
+nslookup openwrt.org 127.0.0.1            # работает ли наш dnsmasq вообще
+pgrep -a https-dns-proxy                   # ДВА экземпляра: :5053 (основной) и :5054 (резервный)
+ip rule show | grep uidrange                # правило резервного пути на месте?
+```
+Ожидается два процесса под РАЗНЫМИ пользователями (`nobody` и `network`) и правило
+`uidrange <uid network> lookup 100`. Нет правила — резервный путь не включён, и смерть туннеля
+унесёт с собой весь резолв; вернуть его вместе с остальным data-plane:
+```bash
+ucode -R /usr/share/cheburnet/engine/install/reapply.uc
+```
+Нет второго процесса — переприменить DoH-шаг **с вашим провайдером** (без stdin шаг возьмёт дефолт
+каталога и молча сменит фильтрацию): `printf '{"provider":"adguard"}' | ucode -R /usr/share/cheburnet/engine/steps/doh/apply.uc`.
+Сторож делает это сам раз в 5 минут, если туннель цел.
+Почему так устроено — [[encrypted-dns]].
+
+### «Туннель не поднять, а интернет нужен прямо сейчас»
+В панели, в блоке состояния при мёртвом туннеле — кнопка **«Выключить защиту (аварийно)»**.
+Трафик пойдёт напрямую, мимо VPN; настройки сохранятся, вернуть — кнопкой «Вернуть защиту».
+Из терминала то же самое:
+```bash
+ucode -R /usr/share/cheburnet/engine/install/pause.uc            # выключить защиту
+ucode -R /usr/share/cheburnet/engine/install/pause.uc --resume   # вернуть
+```
+Пока режим включён, защиту никто не вернёт молча — ни сторож, ни перезагрузка. Подробно:
+[[kill-switch]].
 
 ### «Реклама лезет»
 Блокировку даёт **выбранный DNS-провайдер**, а не локальный список — проверь, что выбран
@@ -127,8 +167,9 @@ Hysteria2 и обфускации, UUID и `pbk`/`sid` у Reality, пароли 
 
 **Снимается:** правила и наборы nft, ip-правила и таблица policy routing, NAT-зона; секции туннеля
 в `network` (обе группы — AmneziaWG и sing-box, независимо от активного протокола); привязки
-dnsmasq (наши ipset-секции, DoH-апстримы, `noresolv`); `https-dns-proxy` целиком; `sing-box`, если
-Full-тир ставился (сервис, uci-секция, `config.json`); содержимое `/etc/cheburnet`.
+dnsmasq (наши ipset-секции, DoH-апстримы, `noresolv`, `strictorder`); `https-dns-proxy` целиком;
+`sing-box`, если Full-тир ставился (сервис, uci-секция, `config.json`); hotplug-хук
+`/etc/hotplug.d/iface/99-cheburnet`; cron-запись сторожа; содержимое `/etc/cheburnet`.
 
 **Остаётся:** пакеты (`apk del` — осознанно забота владельца), движок в `/usr/share/cheburnet`,
 обработчик rpcd и веб-панель, Wi-Fi и пароль root. Панель после сброса открывается и показывает
@@ -149,4 +190,4 @@ Full-тир ставился (сервис, uci-секция, `config.json`); с
 
 - [[data-plane]] — что и как устроено
 - [[kill-switch]] — почему «дроп» это норма
-- [[Home]] — карта знаний
+- [[README|Карта знаний]]

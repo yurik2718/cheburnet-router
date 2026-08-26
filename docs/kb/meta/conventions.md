@@ -94,5 +94,5 @@ done > /tmp/cheburnet-context.md
 
 ## Дальше
 
-- [[Home]] — карта знаний
+- [[README|Карта знаний]]
 - [[glossary]] — термины

@@ -10,8 +10,9 @@ Production-применение split-routing для форвард-трафик
 3. **Policy routing** — `ip rule`/`ip route` разводят помеченное в WAN, остальное в туннель.
 4. **Kill-switch** — роняет непрямой трафик, утекающий в WAN мимо туннеля
    ([kill-switch](../../../docs/kb/concepts/kill-switch.md)).
-5. **Hotplug-хук восстановления** — `/etc/hotplug.d/iface/99-cheburnet`: при подъёме WAN зовёт
-   `install/reapply.uc`.
+5. **Hotplug-хук восстановления** — `/etc/hotplug.d/iface/99-cheburnet`: на `ifup` любого
+   интерфейса сверяет ip-часть с текущим WAN (в travel — kill-switch в ядре) и, если не сходится,
+   зовёт `install/reapply.uc`. Молчит, пока идёт установка/замена сервера.
 
 ## Что переживает перезагрузку, а что нет (несимметрично!)
 
@@ -47,27 +48,24 @@ hotplug-хук: он возвращает ip-часть при подъёме WA
 ## Чистое ядро vs импурный apply
 
 - **`firewall.uc`** — `build_firewall_plan(routing_plan, opts)` → `{uci_teardown, uci_setup,
-  nft_teardown, nft_setup, ip_teardown, ip_setup, killswitch, ok, errors}` + `build_nat_ops(opts)`
-  (uci-операции NAT-зоны). **Чистые функции**; переиспользует
-  `render_sets`/`render_mark_rules`/`render_iprules` из routing (единый источник). Тесты — [tests/](tests/).
-- **`apply.uc`** — **router-side, импурно**: NAT-зона (uci batch + commit + fw4 reload) →
-  teardown (удалить наши цепочки/правила, `|| true`) → setup (`nft -f -`, `ip`). Проверяется в QEMU.
-- **`plan.uc`** — CLI чистого ядра: facts → команды, без применения (локально/в тестах).
-
-> **Порядок критичен:** uci-часть и `fw4 reload` идут **до** nft-инъекции — reload пересобирает
-> таблицу `inet fw4` и стёр бы наши цепочки, если бы шёл после них.
+  nft_path, nft_file, hotplug_path, hotplug_file, nft_teardown, ip_teardown, ip_setup, killswitch,
+  ok, errors}` + `build_nat_ops(opts)`. **Чистые функции**; `ip_setup` — `render_iprules` из
+  routing (единый источник). Тесты — [tests/](tests/).
+- **`apply.uc`** — **router-side, импурно**, в этом порядке: файл `/etc/nftables.d/10-cheburnet.nft`
+  и hotplug-хук → NAT-зона (`uci batch` + commit) → один `fw4 reload` (подхватывает и зону, и
+  файл — окна без kill-switch нет) → `ip rule/route` teardown + setup. Проверяется в QEMU.
+  `--dry-run` печатает всё, что будет применено.
 
 ## Идемпотентность и откат — честно
 
 Шаг **гибридный**. NAT-зона — uci firewall (именованные секции `cheburnet_vpn`/`cheburnet_lan_vpn`,
-delete-before-set): откатывается **чисто** snapshot'ом установки (`firewall ∈ CLEAN_CONFIGS`,
-входит в `snapshot_scope`). Состояние ядра (nft/ip) **не откатывается чисто, как UCI**. Поэтому
-сходимся **пере-применением** (teardown+setup), а не минимальным diff: на повторе конечное
-состояние то же. Свои hooked-цепочки (`cheburnet_mark`, `cheburnet_ks`) удаляются целиком, не
-задевая правил fw4; **сеты не удаляем** — в них живут адреса от dnsmasq (удаление = транзиентная
-потеря direct-маршрутов). Это прямая реализация «грязный откат не маскируем под транзакцию»
-([reliability](../../../docs/kb/architecture/reliability.md)). `--teardown` (standalone-откат
-оркестратором) снимает и nft/ip, и NAT-зону.
+delete-before-set): откатывается **чисто** snapshot'ом установки (`firewall ∈ CLEAN_CONFIGS`).
+Состояние ядра (nft/ip) **не откатывается чисто, как UCI** — сходимся **пере-применением**: файл
+перезаписывается, `fw4 reload` пересобирает цепочки, `ip rule` снимается перед добавлением (он не
+идемпотентен). Это «грязный откат не маскируем под транзакцию»
+([reliability](../../../docs/kb/architecture/reliability.md)). `--teardown` (откат оркестратором,
+аварийный режим, reset) снимает файл, хук, ip-правила, NAT-зону и — явно — цепочки и наборы:
+`fw4 reload` чужие объекты из `inet fw4` не удаляет.
 
 **Forwarding по имени зоны (`lan→vpn`), не по CIDR** — LAN-подсеть в правилах не фигурирует
 (урок v1: хардкод подсети = тихая дыра на нестандартных конфигурациях).
@@ -75,15 +73,17 @@ delete-before-set): откатывается **чисто** snapshot'ом уст
 ## Использование
 
 ```sh
-echo '{"domains":["example.com"],"routing_opts":{"ipv6":false,"wan_if":"eth0"}}' \
-  | ucode -R engine/steps/firewall/plan.uc          # показать план
-echo '{"domains":["example.com"],"routing_opts":{"wan_if":"eth0"}}' \
-  | ucode -R engine/steps/firewall/apply.uc --dry-run
+echo '{"domains":["example.com"],"routing_opts":{"wan_if":"eth0"},"fw_opts":{"tunnel_if":"awg0"}}' \
+  | ucode -R engine/steps/firewall/apply.uc --dry-run   # показать план, не применять
 ```
+
+`fw_opts.tunnel_if` обязателен для Full-тира (`singtun0`): без него NAT-зона строится под `awg0`.
+Все вызывающие (`run.uc`, `install/reapply.uc`) передают его; своих копий «переприменить firewall» в
+других слоях быть не должно.
 
 ## Проверка
 
 `make test-engine` (юнит: содержимое kill-switch HOME/TRAVEL, обязательность `wan_if`,
-неприкосновенность чужих объектов, ipv6). Сгенерированный `nft_setup` дополнительно
-проверен на **реальную загрузку в ядро** через network namespace (`nft -f -`) — правила
-синтаксически валидны end-to-end. Полная проверка работы дропа — в QEMU.
+неприкосновенность чужих объектов, ipv6, гейты hotplug-хука). `make test-netns` грузит
+сгенерированный `nft_file` в **реальное ядро** (network namespace) и проверяет антиутечку.
+Живой fw4, ребут и подъём WAN — `make qemu-reboot`, `make qemu-route-fallback`.

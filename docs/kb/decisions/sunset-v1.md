@@ -67,7 +67,7 @@ updated: 2026-07-10
 `webui.sh`, `install.sh`, `lib.sh`.
 
 **Документация v1:** `docs/01-architecture.md` … `docs/10-upgrades.md`, `docs/commands.md`,
-`docs/RELEASE-CHECKLIST.md` (заменён на [release-checklist.md](release-checklist.md)),
+`docs/RELEASE-CHECKLIST.md` (заменён на [release-checklist.md](../meta/release-checklist.md)),
 `docs/test-lan-conflict.md` (контент перенесён в
 [reference/troubleshooting.md](../reference/troubleshooting.md)), `docs/router-too-small.md`
 (решаемая им проблема — v1-specific, в v2 не воспроизводится), `docs/images/luci-podkop-*.png`.

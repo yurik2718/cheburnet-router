@@ -2,19 +2,21 @@
 
 Пользователь приносит `.conf` от VPN-провайдера; шаг парсит его и приводит UCI-интерфейс
 `awg0` + peer-секцию к желаемому состоянию ([amneziawg](../../../docs/kb/concepts/amneziawg.md)).
-`awg0` — дефолт-маршрут для всего, что не помечено `direct` (его ставит netifd по
-`route_allowed_ips='1'`, см. ниже).
+`awg0` — дефолт-маршрут для всего, что не помечено `direct` (его держат **half-routes**, см. ниже).
 
-## Маршрутизация: туннель = дефолт (v2)
+## Маршрутизация: туннель = дефолт, но WAN-дефолт остаётся
 
-> **`route_allowed_ips='1'`** — netifd ставит `default dev awg0` (туннель — дефолт для всего, что
-> не `direct`) и host-route на endpoint через WAN (без зацикливания). Direct-исключения вытягивает
-> наша [policy-routing](../../../docs/kb/concepts/policy-routing.md) (`mark→table-100→WAN`) — это
-> другая таблица, конфликта нет. **fail-safe:** промах direct-списка = трафик уходит в туннель, а не
-> дропается kill-switch'ем. Зафиксировано тестом.
+> **half-routes `0.0.0.0/1` + `128.0.0.0/1`** (и `::/1` + `8000::/1`) — уже существующие
+> `config route`-секции на `awg0`. Они специфичнее WAN-дефолта `0.0.0.0/0`, поэтому побеждают его
+> в main **без удаления WAN** (приём `redirect-gateway def1` у OpenVPN). Тот же механизм у
+> [Full-тира](../singbox/README.md) — один на оба тира. `route_allowed_ips='0'`: proto-handler свой
+> маршрут не ставит. Direct-исключения вытягивает
+> [policy-routing](../../../docs/kb/concepts/policy-routing.md) (`mark→table-100→WAN`) — другая
+> таблица, конфликта нет. **fail-safe:** промах direct-списка = трафик уходит в туннель, а не
+> дропается kill-switch'ем. Зафиксировано тестами (юниты + `make qemu-route-fallback`).
 >
-> В **v1** дефолт ставил podkop, поэтому стояло `'0'` («маршрутом владеет ядро/podkop»). В v2 podkop
-> убран — дефолт держит netifd, а ядро лишь вытягивает исключения.
+> Почему не `route_allowed_ips='1'` (так было раньше) — шрам «у пути наружу должен быть фолбэк»,
+> см. [reliability](../../../docs/kb/architecture/reliability.md) и `make qemu-route-fallback`.
 
 `allowed_ips` навязываем full (`0.0.0.0/0`, `::/0`): туннель принимает весь трафик, а *направление*
 (что вынуть в WAN) решает policy routing. Поле `AllowedIPs` из `.conf` намеренно игнорируем.
@@ -27,7 +29,7 @@
   (`uci batch`) → `commit network` → `network reload` → проверка `ip link` → при отсутствии
   устройства эскалация в `network restart` (на свежей установке proto-handler только что
   доставлен пакетом, и `reload` его не подхватывает — `proto:none/NO_DEVICE`). QEMU/железо.
-- **`plan.uc`** — CLI чистого ядра: `.conf` со stdin → uci-операции, без применения.
+- **`plan.uc`** — CLI чистого ядра (`.conf` → uci-план, без применения); им rpcd валидирует конфиг синхронно.
 
 ## Граница доверия и валидация
 
@@ -54,6 +56,6 @@ cat awg0.conf | ucode -R engine/steps/vpn/apply.uc --dry-run
 ## Тесты
 
 `make test-engine`. Покрыто: split_endpoint (v4/v6/мусор), парсер (секции, inline-комментарии,
-base64-`=`), обфускация только присутствующая, **`route_allowed_ips=1` (туннель=дефолт)**, peer
+base64-`=`), обфускация только присутствующая, **half-routes (туннель=дефолт, WAN цел)**, peer
 (endpoint/PSK/forced allowed_ips/keepalive), dual-stack Address, teardown, валидация входа,
 кастомное имя интерфейса.

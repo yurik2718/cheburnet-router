@@ -13,7 +13,6 @@
   реальные секции** wifi-iface (имена нестандартны → не хардкодим `radio0`), выбирает шифрование
   по установленному wpad, применяет `teardown` (`uci -q`, tolerant) → `setup` (`uci batch`) →
   `commit` → `wifi reload`. Проверяется в QEMU.
-- **`plan.uc`** — CLI чистого ядра: `{ssid,key,ifaces?}` (stdin) → операции, без применения.
 
 ## No-op без вреда (fail-safe)
 

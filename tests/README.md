@@ -7,6 +7,9 @@
 ```
 tests/
 ├── lint.sh                       # T1 — единая точка статики (CI + локально)
+├── bootstrap-test.sh             # T2 (shell): bootstrap.sh на фейках — ретраи, токен, код выхода
+├── install-singbox-test.sh       # T2 (shell): install-singbox.sh на фейках — порядок пакетов, ретраи
+├── netns/dataplane.sh            # T2.5: РЕАЛЬНЫЙ вывод движка в network namespace — split + антиутечка
 ├── poc/split-routing-netns.sh    # Фаза 0 PoC: split-routing на nft/ip в network namespace
 ├── vps/                          # T5 — СЕРВЕРНАЯ сторона: одноразовый стенд на арендованном VPS
 │   ├── provision-lab.sh          #      три протокола с одного VPS (AWG + Reality + Hysteria2)
@@ -22,12 +25,18 @@ tests/
 └── qemu/                         # T3 — живой OpenWrt в qemu/KVM
     ├── lib.sh                    # общая инфра (образ snapshot'а, serial-консоль)
     ├── smoke.sh                # T3a: hermetic smoke движка (rpcd, ubus, fw4)
+    ├── webui.sh                # T3b: HTTP-слой веб-мастера (uhttpd, ACL, сессии)
     ├── install.sh              # T3c: DEPENDS + data-plane через реальный apk-feed
+    ├── reality.sh              # T3d: обвязка VLESS+Reality на живом netifd
+    ├── hysteria.sh             # T3e: обвязка Hysteria2 + замер веса Full-тира
+    ├── netem.sh                # T3f: замер goodput/CPU при потерях (QUIC vs TCP)
     ├── rollback.sh             # T3g: полная установка через ubus + откат при мёртвом сервере
-    ├── live-vps.sh                # T4a: трафик насквозь через настоящий сервер (нужен стенд vps/)
-    ├── live-install.sh         # T4b: успешная установка целиком + ребут поверх неё
     ├── reboot.sh               # T3h: конфигурация переживает перезагрузку роутера
-    └── webui.sh                # T3b: HTTP-слой веб-мастера (uhttpd, ACL, сессии)
+    ├── route-fallback.sh       # T3i: маршрут туннеля переживает переподключение WAN
+    ├── dns-fallback.sh         # T3j: DNS переживает смерть туннеля; сторож чинит сам
+    ├── emergency.sh            # T3k: аварийный режим возвращает интернет и обратим
+    ├── live-vps.sh             # T4a: трафик насквозь через настоящий сервер (нужен стенд vps/)
+    └── live-install.sh         # T4b: успешная установка целиком + ребут поверх неё
 ```
 
 Юнит-тесты движка (чистая логика на ucode) живут рядом с кодом в `engine/` — см.
@@ -79,7 +88,12 @@ make qemu-reboot    # T3h: конфигурация переживает ПЕР�
 make qemu-reality   # T3d: обвязка VLESS+Reality на живом netifd, ~4-6 мин
 make qemu-hysteria  # T3e: обвязка Hysteria2 + замер веса Full-тира, ~4-6 мин
 make qemu-netem     # T3f: ЗАМЕР goodput/CPU при потерях (QUIC vs TCP), ~6-10 мин
+make qemu-route-fallback  # T3i: WAN переподключился — маршрут туннеля и путь наружу целы
+make qemu-dns-fallback    # T3j: туннель умер — DNS жив резервным путём; сторож чинит инварианты
+make qemu-emergency       # T3k: аварийный режим (выключить/вернуть защиту) через pause.uc
 ```
+
+Shell-скрипты роутера на фейках (секунды): `make test-shell`.
 
 **T3g** закрывает дыру, которая была самой дорогой: до него успешная последовательность
 оркестратора (preflight → снимок → шаги → health-check → commit/rollback) на живой системе не
@@ -107,8 +121,8 @@ T3f — не гейт, а **измеритель**: он печатает циф
 
 Поднимают релизный образ OpenWrt x86-64 в qemu/KVM и гоняют движок на **реальном** busybox-окружении
 (не host-bash/gawk, на которых работают T1/T2). Детали и что именно каждый уровень покрывает —
-[tests/qemu/README.md](qemu/README.md). Гейтят CI: `qemu-smoke` на каждый push/PR,
-`qemu-install` — release-gate (нужен интернет, не гоняется на PR).
+[tests/qemu/README.md](qemu/README.md). В CI (`.github/workflows/test.yml`) `qemu-smoke` и
+`qemu-install` идут на каждый push; остальные — по ручному запуску и перед тегом.
 
 ## T5 — одноразовый стенд на арендованном VPS
 
@@ -155,3 +169,24 @@ TLS-инспекция переписывает ClientHello), **PMTU на реа
 соединиться с сервером после снятия Light-тира и split-tunnel выключался после перезагрузки —
 разбор в [ADR 0004](../docs/kb/decisions/0004-multi-protocol-tiers.md). Чек-лист релиза —
 [docs/kb/meta/release-checklist.md](../docs/kb/meta/release-checklist.md).
+
+## Обещания → тесты
+
+Отдельный класс тестов: не «шаг записал такие секции», а **фраза, которую продукт говорит
+человеку**. Оба инцидента 2026-08 были нарушением обещаний при полностью зелёных тестах шагов —
+каждый кусок по отдельности был правильным, а обещание не проверял никто.
+
+| Обещание (панель / README) | Тест |
+|---|---|
+| «Настроил один раз — работает годами» (переживает перезагрузку) | `make qemu-reboot` |
+| У роутера всегда есть путь наружу, туннель не уносит его с собой | `make qemu-route-fallback` |
+| «Туннель не работает → открываются сайты из списка "напрямую"» | `make qemu-dns-fallback` |
+| «Мимо туннеля не утечёт» (kill-switch, home и travel) | `make test-netns` |
+| «Поставилось и не сломало роутер» (провал = честный откат) | `make qemu-rollback` |
+| Всё на месте и чинится само, если отвалилось | `make qemu-dns-fallback` (проверки 7-10) |
+| «Не поднять туннель — одна кнопка вернёт интернет, вторая вернёт защиту» | `make qemu-emergency` |
+
+**Правило для новых тестов этого класса: отрицательный контроль обязателен.** Тест, который
+прошёл бы и без починки, ничего не доказывает — он декорация. Сломайте механизм явно и убедитесь,
+что тест краснеет (примеры: `dns-fallback` снимает правило `uidrange`, `route-fallback` проверяет
+`ifdown` туннеля).

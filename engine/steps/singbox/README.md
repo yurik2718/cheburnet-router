@@ -14,7 +14,7 @@
 **общие**. Отсюда и общий туннельный интерфейс: firewall/policy-routing/NAT-зона не знают, какой
 протокол активен, а проба и признак здоровья одни на оба (ADR 0004, «единый контракт транспорта»).
 
-## Инвариант (у AWG тот же смысл несёт `route_allowed_ips='1'`)
+## Инвариант (у AWG — тот же самый механизм, см. `steps/vpn`)
 
 > **`auto_route: false`** — маршрутизацией управляет **ядро**
 > ([policy-routing](../../../docs/kb/concepts/policy-routing.md)), а **не** sing-box. sing-box
@@ -27,8 +27,8 @@
 
 ## Кто ставит маршрут «весь трафик в туннель»
 
-Раз `auto_route: false`, маршрут в `singtun0` держит **netifd**, а не sing-box (симметрия с
-`route_allowed_ips=1` у AWG, где маршрут ставит proto-handler). Шаг создаёт тонкий интерфейс
+Раз `auto_route: false`, маршрут в `singtun0` держит **netifd**, а не sing-box (та же схема, что
+у AWG в `steps/vpn` — half-routes на интерфейсе туннеля). Шаг создаёт тонкий интерфейс
 `network.singtun` (`proto none` поверх устройства `singtun0` — адрес назначает сам sing-box) и
 две **half-route** `0.0.0.0/1` + `128.0.0.0/1`. Они специфичнее WAN-дефолта `0.0.0.0/0`, поэтому
 побеждают его в main-таблице **без удаления WAN** (приём `redirect-gateway def1` у OpenVPN). WAN

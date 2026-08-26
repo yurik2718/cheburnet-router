@@ -9,9 +9,19 @@
 
 | Команда | Что делает | Время | Интернет нужен? |
 |---|---|---|---|
-| `make qemu-smoke` | T3a — hermetic smoke движка: ubus-методы, граница доверия, rootpass→session.login, family, NAT-зона+nft+teardown | ~2мин | нет* |
+| `make qemu-smoke` | T3a — hermetic smoke движка: ubus-методы, граница доверия, rootpass→session.login, NAT-зона+nft+teardown | ~2мин | нет* |
 | `make qemu-webui` | T3b — + uhttpd + HTTP/UI: раздача Svelte-бандла, ACL anon-vs-admin, session.login | ~3мин | да (apk add uhttpd-mod-ubus) |
 | `make qemu-install` | T3c — установка через **apk** + data-plane против реальных сервисов (dnsmasq-full/https-dns-proxy) | ~5-8мин | да (apk) |
+| `make qemu-reality` / `qemu-hysteria` | T3d/T3e — обвязка Full-тира: config.json + `sing-box check`, netifd-маршрут, проба, teardown; замер веса | ~4-6мин | да |
+| `make qemu-netem` | T3f — goodput/CPU при потерях, QUIC против TCP (цифры в ADR 0004, релиз не гейтит) | ~6-10мин | да |
+| `make qemu-rollback` | T3g — полная установка через ubus + откат при мёртвом сервере | ~5-8мин | да |
+| `make qemu-reboot` | T3h — data-plane переживает перезагрузку | ~6-9мин | да |
+| `make qemu-route-fallback` | T3i — WAN переподключился: half-routes и путь наружу целы | ~5-8мин | да |
+| `make qemu-dns-fallback` | T3j — туннель умер: DNS жив резервным путём; сторож чинит инварианты | ~6-9мин | да |
+| `make qemu-emergency` | T3k — аварийный режим: выключить защиту / вернуть | ~6-9мин | да |
+| `make qemu-live-vps` / `qemu-live-install` | T4 — трафик насквозь через настоящий сервер; commit-ветка + ребут (нужен стенд `tests/vps/`, не CI) | ~10мин | да |
+
+Полные описания — комментарии к целям в корневом `Makefile`.
 
 Все запускаются из корня репо. При падении автоматически выводят последние 60 строк
 serial-консоли VM и возвращают exit ≠ 0. (*первый запуск качает образ — дальше кэш.)
@@ -22,8 +32,8 @@ serial-консоли VM и возвращают exit ≠ 0. (*первый за
 `/usr/share/cheburnet`, ACL из реестра) и проверяет на живом OpenWrt то, что юниты и dry-run'ы
 не могут: регистрацию ubus-методов, границу доверия сквозь настоящий rpcd (required/токен-гейт/
 confirm), `steps/rootpass` на реальном busybox `passwd` + **`session.login` этим паролем**
-(ключевое допущение входа в панель), no-op wifi-шага без радио, family on/off на реальном
-busybox-uci, NAT-зону + nft-цепочки + `--teardown` на реальном fw4. Не покрывает: HTTP-слой
+(ключевое допущение входа в панель), no-op wifi-шага без радио, NAT-зону + nft-цепочки +
+`--teardown` на реальном fw4. Не покрывает: HTTP-слой
 `/ubus` с ACL-инфорсментом (уровень T3b) и полный install (apk, AWG-сервер).
 
 T3a НЕ зовёт `apk`/`wget` к github — все файлы кладутся напрямую через ssh+cat, интернет не нужен.
@@ -101,10 +111,10 @@ upstream, который **не блокирует** релиз.
 
 ## Архитектура
 
-- `lib.sh` — общая инфра: paths, deps, image-prep, qemu-launch, serial+ssh helpers, boot+setup, deploy. Source-only.
-- `smoke.sh` — T3a-asserts поверх lib.sh.
-- `webui.sh` — T3b: HTTP/JSON-RPC asserts поверх lib.sh.
-- `install.sh` — T3c: DEPENDS + data-plane на реальных сервисах.
+- `lib.sh` — общая инфра: paths, deps, image-prep, qemu-launch, serial+ssh helpers, boot+setup,
+  deploy, `vm_start_firewall`, `vm_inv_failed` (чек-лист инвариантов). Source-only.
+- Остальные `*.sh` — по одному сценарию из таблицы выше поверх lib.sh; новые сценарии начинаются с
+  копии ближайшего (`emergency.sh` — образец с отрицательным контролем).
 
 При падении — лог serial-консоли в `.work/serial.log`. Trap EXIT гарантированно убивает qemu и
 чистит fifo, даже на Ctrl+C.

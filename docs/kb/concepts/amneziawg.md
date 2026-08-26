@@ -2,7 +2,7 @@
 title: AmneziaWG — обфусцированный VPN-туннель
 tags: [concept, vpn, security]
 aliases: [amneziawg, awg, awg0, туннель]
-updated: 2026-06-08
+updated: 2026-08-22
 ---
 
 # AmneziaWG — VPN-туннель
@@ -29,20 +29,26 @@ updated: 2026-06-08
 
 ## Роль в нашей архитектуре
 
-`awg0` — это **default-маршрут для всего, кроме исключений**. `route_allowed_ips='1'` на
-AWG-пире — netifd сам ставит `default dev awg0` в main-таблице:
+`awg0` — это **default-маршрут для всего, кроме исключений**. Держат его не один `default`, а две
+**half-route**, которые netifd ставит по нашим `config route`-секциям:
 
 ```
-# main-таблица маршрутизации (её ставит netifd, не мы)
-ip route add default dev awg0
+# main-таблица маршрутизации (её ставит netifd по секциям шага vpn)
+ip route add 0.0.0.0/1   dev awg0     # ← специфичнее, чем 0.0.0.0/0 у WAN,
+ip route add 128.0.0.0/1 dev awg0     #   поэтому побеждают его, НЕ УДАЛЯЯ
+default via <шлюз> dev <WAN>          # ← остаётся на месте
 ```
 
 Всё, что [[dnsmasq-nftset|не попало]] в `direct`, идёт в `awg0` → зашифрованно и
 обфусцированно до VPN-сервера → в интернет.
 
-> [!important] Инвариант: конфликта с policy-routing нет
-> Direct-домены уходят по [[policy-routing|отдельной таблице 100]], а не через main — поэтому
-> `route_allowed_ips='1'` можно доверить netifd, не отключая его.
+> [!important] Инвариант: WAN-дефолт обязан остаться в main
+> Через него уходит direct-трафик ([[policy-routing|таблица 100]]), к нему netifd пинит endpoint
+> туннеля, и он же единственный путь роутера наружу, когда туннеля нет. Поэтому `awg0` НЕ ставит
+> свой `0.0.0.0/0`: один default **замещал** бы WAN-овский, и в `main` не осталось бы фолбэка —
+> исчез туннель, и роутер без связи до перезагрузки (см. [[reliability]], регресс-тест
+> `make qemu-route-fallback`). Конфликта с policy-routing нет: direct-домены идут отдельной таблицей,
+> а не через main.
 
 ## Конфиг
 

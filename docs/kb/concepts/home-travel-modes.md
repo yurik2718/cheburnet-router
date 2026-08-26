@@ -9,8 +9,7 @@ updated: 2026-06-08
 
 > [!tip] TL;DR
 > **HOME** — split: домены из direct-списка напрямую, остальное в туннель. **TRAVEL** —
-> full tunnel: вообще всё через VPN. Переключение — только через [[web-wizard|веб-мастер]] и
-> CLI `vpn-mode`.
+> full tunnel: вообще всё через VPN. Переключение — из панели ([[web-wizard]]), ubus-метод `set_mode`.
 
 ## Зачем два режима
 
@@ -37,13 +36,16 @@ updated: 2026-06-08
 > у большинства роутеров их нет, а целевой пользователь ходит через
 > `http://192.168.1.1/cheburnet/`. (Инвариант из v1.)
 
-## CLI
+## Из консоли
 
 ```bash
-vpn-mode home      # включить split
-vpn-mode travel    # включить full tunnel
-vpn-mode status    # текущий режим + состояние туннеля
+ubus call cheburnet set_mode '{"mode":"travel"}'   # или "home"; нужна admin-сессия ubus
+ubus call cheburnet status                          # текущий режим + состояние туннеля
 ```
+
+Переключение переприменяет firewall (`install/reapply.uc`: kill-switch строже, правил направления
+нет) и DNS-шаг (в travel nftset пуст). `install.json` отражает применённое состояние: не удалось —
+прежний режим возвращается.
 
 ## Дальше
 

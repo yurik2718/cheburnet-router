@@ -6,10 +6,9 @@
   на примитивах ядра, движок на ucode, дистрибуция через GitHub Releases + apk.
 - **[База знаний (Obsidian-vault)](kb/README.md)** — образовательная документация «от первых
   принципов»: как работает [split-routing](kb/concepts/split-routing.md),
-  [DNS и маршрутизация](kb/concepts/dns-and-routing.md),
   [policy routing](kb/concepts/policy-routing.md), и почему приняты ключевые
-  [решения (ADR)](kb/decisions/0001-why-not-singbox.md). Точка входа —
-  [kb/Home.md](kb/Home.md).
+  [решения (ADR)](kb/decisions/0001-why-not-singbox.md). Точка входа и карта —
+  [kb/README.md](kb/README.md).
 
 > Для AI-ассистентов и контрибьюторов: гид по проекту — `CLAUDE.md` в корне репозитория.
 
