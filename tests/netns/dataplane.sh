@@ -96,10 +96,12 @@ build_topology() {
 	ip link add "$tun" type dummy; ip link set "$tun" up; ip addr add 10.88.0.1/24 dev "$tun"
 	ip link add wan0 type dummy;   ip link set wan0 up;   ip addr add 10.99.0.1/24 dev wan0
 
-	# main-таблица КАК НА РОУТЕРЕ: туннель выигрывает (metric 10), WAN-дефолт существует как
-	# фолбэк (metric 100). Их держит netifd/awg, не наш шаг — поэтому ставит стенд, а не движок.
-	ip route add default dev "$tun" metric 10
-	ip route add default dev wan0 metric 100
+	# main-таблица КАК НА РОУТЕРЕ: туннель держат half-routes 0.0.0.0/1 + 128.0.0.0/1 — они
+	# специфичнее WAN-дефолта, поэтому побеждают его НЕ УДАЛЯЯ (см. HALF_ROUTES в steps/vpn/vpn.uc
+	# и build_net_plan в steps/singbox). Их ставит netifd, не наш шаг — поэтому стенд, а не движок.
+	ip route add 0.0.0.0/1   dev "$tun"
+	ip route add 128.0.0.0/1 dev "$tun"
+	ip route add default     dev wan0
 
 	# --- РЕАЛЬНЫЙ вывод движка: nft (mark + kill-switch) + policy-routing ---
 	nft_body=$(emit "{\"what\":\"nft\",\"domains\":[\"x.example\"],\"routing_opts\":{\"ipv6\":false,\"wan_if\":\"wan0\",\"mode\":\"$mode\"},\"fw_opts\":{\"tunnel_if\":\"$tun\"}}")
@@ -148,8 +150,8 @@ scenario_home() {
 		&& ok "[$TUN] непрямой → туннель, WAN чист (c_tun=$(ctun) c_wan=$(cwan))" \
 		|| bad "[$TUN] непрямой распределён неверно (c_tun=$(ctun) c_wan=$(cwan))"
 
-	hdr "HOME / $TUN — KILL-SWITCH (туннель УПАЛ: netifd снял default)"
-	ip route del default dev "$TUN" metric 10
+	hdr "HOME / $TUN — KILL-SWITCH (туннель УПАЛ: netifd снял half-routes)"
+	ip route del 0.0.0.0/1 dev "$TUN"; ip route del 128.0.0.0/1 dev "$TUN"
 	zero; send_other
 	[ "$(cwan)" -eq 0 ] \
 		&& ok "[$TUN] АНТИУТЕЧКА: непрямой ДРОПнут, НЕ утёк в WAN (c_wan=$(cwan))" \
@@ -173,7 +175,7 @@ scenario_travel() {
 		|| bad "[travel] трафик не в туннеле (c_tun=$(ctun) c_wan=$(cwan))"
 
 	hdr "TRAVEL / $TUN — KILL-SWITCH (туннель УПАЛ)"
-	ip route del default dev "$TUN" metric 10
+	ip route del 0.0.0.0/1 dev "$TUN"; ip route del 128.0.0.0/1 dev "$TUN"
 	zero; send_other
 	[ "$(cwan)" -eq 0 ] \
 		&& ok "[travel] АНТИУТЕЧКА: при мёртвом туннеле ничего не утекло в WAN (c_wan=$(cwan))" \

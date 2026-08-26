@@ -22,12 +22,9 @@ function run_stdin(cmd, text) {
 }
 
 // uci_batch(ops, commit_config?) → 0 = успех, 1 = uci сообщил об ошибках, -1 = не запустился.
-// Пишет операции построчно, опционально `commit <config>`. ВЫЗЫВАЮЩИЙ ОБЯЗАН проверить код —
-// молча проглоченный сбой = полуприменённый конфиг под видом успеха.
-//
-// ПЛАТФОРМЕННЫЙ КВИРК: `uci batch` всегда выходит 0, даже на битом синтаксисе, несуществующем
-// package или Unknown command (доказано на живом OpenWrt) — сигнал не код выхода, а ЛЮБОЙ вывод.
-// «Entry not found» (rc=1) не логируем: для teardown/delete-before-set отсутствие записи — норма.
+// ВЫЗЫВАЮЩИЙ ОБЯЗАН проверить код — проглоченный сбой = полуприменённый конфиг под видом успеха.
+// Квирк платформы: `uci batch` выходит 0 даже на ошибках (доказано на живом OpenWrt) — сигнал не
+// код, а ЛЮБОЙ вывод; «Entry not found» не логируем (для delete-before-set отсутствие — норма).
 function uci_batch(ops, commit_config) {
 	if (length(ops) == 0 && !commit_config) return 0;
 	let all = [];
@@ -48,4 +45,9 @@ function uci_batch(ops, commit_config) {
 	return 1;
 }
 
-export { sh, run_stdin, uci_batch };
+// shellquote(s) → строка в одинарных кавычках для `sh -c` (JSON в printf, текст в logger).
+function shellquote(s) {
+	return "'" + replace(s ?? "", "'", "'\\''") + "'";
+}
+
+export { sh, run_stdin, uci_batch, shellquote };

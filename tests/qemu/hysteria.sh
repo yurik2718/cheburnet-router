@@ -195,7 +195,7 @@ fi
 echo "→ connectivity-probe на живой системе — должен ОТВЕРГНУТЬ мёртвый туннель"
 cat > "$WORK/probe-check.uc" <<'UC'
 import { tunnel_connectivity } from "/usr/share/cheburnet/engine/install/probe.uc";
-printf("%s\n", tunnel_connectivity("singtun0") ? "UP" : "DOWN");
+printf("%s\n", tunnel_connectivity("singtun0").ok ? "UP" : "DOWN");
 UC
 vm_scp "$WORK/probe-check.uc" "/tmp/probe-check.uc"
 probe="$(vm_ssh 'ucode -R /tmp/probe-check.uc 2>/dev/null')"

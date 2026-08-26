@@ -207,7 +207,7 @@ check_link() { # NAME LINK
 # Обёртка пробы — тот же код, что гейтит установку.
 cat > "$WORK/probe-check.uc" <<'UC'
 import { tunnel_connectivity } from "/usr/share/cheburnet/engine/install/probe.uc";
-printf("%s\n", tunnel_connectivity("singtun0") ? "UP" : "DOWN");
+printf("%s\n", tunnel_connectivity("singtun0").ok ? "UP" : "DOWN");
 UC
 vm_scp "$WORK/probe-check.uc" "/tmp/probe-check.uc"
 

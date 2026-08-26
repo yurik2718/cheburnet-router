@@ -200,9 +200,18 @@ vm_ssh 'echo '\''{"provider":"adguard-family"}'\'' | ucode -R /usr/share/cheburn
     || { echo "  ✗ doh/apply (adguard-family) exit != 0"; exit 1; }
 vm_ssh 'uci -q get https-dns-proxy.cheburnet_doh.resolver_url | grep -q "family.adguard-dns.com"' \
     || { echo "  ✗ смена провайдера не переписала url"; vm_ssh 'uci show https-dns-proxy'; exit 1; }
+# Секций РОВНО две: основной экземпляр (через туннель) и резервный (мимо туннеля, см.
+# [[encrypted-dns]]). Больше двух — накопились дубли/стоковые секции пакета: они займут порты и
+# упрутся в наши, меньше — резервный путь не создан, и смерть туннеля унесёт весь резолв.
 sect_n="$(vm_ssh 'uci show https-dns-proxy | grep -c "=https-dns-proxy$"')"
-[ "$sect_n" = "1" ] || { echo "  ✗ секций резолвера $sect_n (ожидал 1 — чистая замена, без дублей)"; vm_ssh 'uci show https-dns-proxy'; exit 1; }
-echo "  ✓ провайдер переключился, секция одна (идемпотентно)"
+[ "$sect_n" = "2" ] || { echo "  ✗ секций резолвера $sect_n (ожидал 2: основная + резервная, без дублей)"; vm_ssh 'uci show https-dns-proxy'; exit 1; }
+vm_ssh 'uci -q get https-dns-proxy.cheburnet_doh_wan.resolver_url | grep -q "family.adguard-dns.com"' \
+    || { echo "  ✗ резервный экземпляр не переключился на того же провайдера — фильтрация разъехалась"; vm_ssh 'uci show https-dns-proxy'; exit 1; }
+main_u="$(vm_ssh 'uci -q get https-dns-proxy.cheburnet_doh.user')"
+wan_u="$(vm_ssh 'uci -q get https-dns-proxy.cheburnet_doh_wan.user')"
+[ -n "$wan_u" ] && [ "$main_u" != "$wan_u" ] \
+    || { echo "  ✗ у экземпляров один владелец ($main_u/$wan_u) — правило по uid их не различит"; exit 1; }
+echo "  ✓ провайдер переключился на обоих экземплярах, дублей нет (идемпотентно)"
 
 echo "→ https-dns-proxy стартует с применённым конфигом"
 vm_ssh '/etc/init.d/https-dns-proxy restart >/dev/null 2>&1; sleep 2; /etc/init.d/https-dns-proxy status | grep -qi running' \

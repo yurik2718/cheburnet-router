@@ -317,6 +317,28 @@ vm_start_firewall() {
     echo "  ✓ fw4 работает, ssh жив"
 }
 
+# vm_wait_ssh [СЕКУНД] — дождаться, пока ssh снова отвечает. Нужен тестам, которые дёргают тот
+# самый интерфейс, по которому идёт ssh (ifup wan / network restart): команда возвращается раньше,
+# чем netifd действительно рвёт и поднимает линк.
+vm_wait_ssh() {
+    local deadline=$(( SECONDS + ${1:-60} ))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if vm_ssh true 2>/dev/null; then return 0; fi
+        sleep 2
+    done
+    return 1
+}
+
+# vm_inv_failed ENGINE — id провалившихся инвариантов (engine/invariants), по одному в строке.
+# Пусто = всё на месте. Нужен тестам, которые проверяют состояние data-plane целиком, вместо
+# самодельных grep по ip/nft в каждом тесте: список инвариантов один, и тесты сверяются с ним.
+vm_inv_failed() {
+    vm_ssh "ucode -R $1/invariants/gather.uc | ucode -R $1/invariants/check.uc --json" 2>/dev/null \
+        | python3 -c 'import json,sys
+r = json.load(sys.stdin)
+print("\n".join(c["id"] for c in r["checks"] if not c["ok"]))' || true
+}
+
 # vm_check_dns() — nslookup в VM или exit 1. Без интернета apk update/add бессмысленны.
 vm_check_dns() {
     echo "→ Проверяю интернет в VM"

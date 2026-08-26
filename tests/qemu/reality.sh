@@ -156,13 +156,50 @@ else
     echo "  ✓ места хватает → флеш причиной не назван"
 fi
 
+# ─── 1c. set_mode из панели на Full-тире НЕ пересобирает NAT-зону под awg0 ──────
+# ШРАМ (аудит 2026-08-26): у set_mode была своя копия переприменения firewall без tunnel_if, и
+# dry-run показывал `add_list firewall.cheburnet_vpn.network='awg0'` при активном singtun0 —
+# LAN→singtun0 выпадал из зоны. Теперь set_mode идёт через install/reapply.uc; проверяем фактом.
+echo "→ set_mode через rpcd на Full-тире: NAT-зона остаётся на singtun0"
+WAN_DEV="$(vm_ssh "ip -4 route show default | grep -v ' dev singtun0' | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1")"
+WAN_GW="$(vm_ssh "ip -4 route show default | grep -v ' dev singtun0' | sed -n 's/.*via \([0-9.]*\).*/\1/p' | head -1")"
+vm_ssh "mkdir -p /tmp/cheburnet /etc/cheburnet && printf '%s' '{\"protocol\":\"reality\",\"domains\":[\"example.com\"],\"routing_opts\":{\"mode\":\"home\",\"wan_if\":\"$WAN_DEV\",\"tunnel_if\":\"singtun0\",\"ipv6\":false}}' > /etc/cheburnet/install.json"
+vm_ssh "echo '{\"domains\":[\"example.com\"],\"routing_opts\":{\"wan_if\":\"$WAN_DEV\",\"wan_gw\":\"$WAN_GW\",\"ipv6\":false},\"fw_opts\":{\"tunnel_if\":\"singtun0\"}}' | ucode -R $ENG/steps/firewall/apply.uc" >/dev/null \
+    || { echo "  ✗ firewall-шаг не применился"; exit 1; }
+for mode in travel home; do
+    OUT="$(vm_ssh "printf '%s' '{\"mode\":\"$mode\"}' | ucode -R $ENG/ubus/rpcd-cheburnet call set_mode")"
+    printf '%s\n' "$OUT" | grep -q '"status":[ ]*"ok"' \
+        || { echo "  ✗ set_mode $mode не ответил ok: $OUT"; vm_ssh "logread | tail -20"; exit 1; }
+    vm_ssh "uci -q get firewall.cheburnet_vpn.network | grep -qw singtun0" \
+        || { echo "  ✗ после set_mode $mode NAT-зона смотрит не на singtun0: $(vm_ssh 'uci -q get firewall.cheburnet_vpn.network')"; exit 1; }
+    # В home хук сверяет WAN мимо ИМЕННО нашего туннеля; в travel интерфейс ему не нужен —
+    # гейт по kill-switch в ядре (см. render_hotplug).
+    if [ "$mode" = home ]; then
+        vm_ssh "grep -q \"grep -v ' dev singtun0'\" /etc/hotplug.d/iface/99-cheburnet" \
+            || { echo "  ✗ hotplug-хук в home собран не под singtun0"; vm_ssh "cat /etc/hotplug.d/iface/99-cheburnet"; exit 1; }
+    else
+        vm_ssh "grep -q 'nft list chain inet fw4 cheburnet_ks' /etc/hotplug.d/iface/99-cheburnet" \
+            || { echo "  ✗ hotplug-хук в travel не гейтится по kill-switch"; exit 1; }
+        vm_ssh "! ip rule show | grep -qE 'fwmark|uidrange'" \
+            || { echo "  ✗ в travel остались правила направления home"; vm_ssh "ip rule show"; exit 1; }
+    fi
+done
+vm_ssh "ip rule show | grep -q 'fwmark 0x1 lookup 100'" \
+    || { echo "  ✗ правило направления не вернулось в home"; vm_ssh "ip rule show"; exit 1; }
+echo "  ✓ set_mode travel/home: зона vpn и хук остались на singtun0, правила home на месте"
+# Возвращаем VM как было: firewall-шаг снят, dnsmasq без noresolv (DNS-шаг set_mode его ставил).
+vm_ssh "echo '{\"domains\":[],\"routing_opts\":{\"wan_if\":\"$WAN_DEV\"}}' | ucode -R $ENG/steps/firewall/apply.uc --teardown" >/dev/null
+vm_ssh "uci -q delete dhcp.@dnsmasq[0].noresolv; uci -q delete dhcp.cheburnet_dns4; uci -q delete dhcp.cheburnet_dns6; uci commit dhcp; /etc/init.d/dnsmasq reload >/dev/null 2>&1; rm -f /etc/cheburnet/install.json"
+
 # ─── 2. connectivity-probe отвергает неработающий туннель (fail-safe) ─────────
-# Сервер недостижим → байты через туннель не идут → tunnel_connectivity ОБЯЗАН вернуть false.
+# Сервер недостижим → байты через туннель не идут → tunnel_connectivity ОБЯЗАН вернуть ok=false.
+# ШРАМ: проба возвращает { ok, reason } (с 2026-08-19), а тест сравнивал сам объект — он всегда
+# истинен, и «мёртвый туннель принят за рабочий» проходил бы молча. Смотрим ровно на .ok.
 # Это суть надёжности: «процесс жив» тут true (pgrep sing-box), но проба смотрит на ТРАФИК.
 echo "→ connectivity-probe на живой системе — должен ОТВЕРГНУТЬ мёртвый туннель"
 cat > "$WORK/probe-check.uc" <<'UC'
 import { tunnel_connectivity } from "/usr/share/cheburnet/engine/install/probe.uc";
-printf("%s\n", tunnel_connectivity("singtun0") ? "UP" : "DOWN");
+printf("%s\n", tunnel_connectivity("singtun0").ok ? "UP" : "DOWN");
 UC
 vm_scp "$WORK/probe-check.uc" "/tmp/probe-check.uc"
 probe="$(vm_ssh 'ucode -R /tmp/probe-check.uc 2>/dev/null')"

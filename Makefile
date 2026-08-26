@@ -14,6 +14,9 @@
 #   make qemu-rollback — T3g: ПОЛНАЯ установка через ubus + откат при мёртвом сервере
 #                            (~5-8мин, интернет). Единственная живая проверка оркестратора.
 #   make qemu-reboot   — T3h: конфигурация переживает перезагрузку роутера (~6-9мин, интернет).
+#   make qemu-route-fallback — T3i: маршрут туннеля переживает переподключение WAN (~5-8мин, интернет).
+#   make qemu-dns-fallback — T3j: DNS переживает смерть туннеля (~6-9мин, интернет).
+#   make qemu-emergency    — T3k: аварийный режим возвращает интернет и обратим (~6-9мин, интернет).
 #   make qemu-reality  — T3d: обвязка VLESS+Reality на живом OpenWrt (~4-6мин, интернет).
 #   make qemu-hysteria — T3e: обвязка Hysteria2 + замер веса Full-тира (~4-6мин, интернет).
 #   make qemu-netem    — T3f: ЗАМЕР goodput/CPU при потерях (netem), QUIC против TCP
@@ -22,7 +25,7 @@
 #                            поднятый стенд (tests/vps/) — не для CI.
 #   make qemu-live-install— T4b: успешная установка целиком + ребут поверх неё (стенд tests/vps/).
 
-.PHONY: lint test-engine test-netns test-shell poc-split qemu-smoke qemu-webui qemu-install qemu-rollback qemu-reboot qemu-reality qemu-hysteria qemu-netem qemu-live-vps qemu-live-install
+.PHONY: lint test-engine test-netns test-shell poc-split qemu-smoke qemu-webui qemu-install qemu-rollback qemu-reboot qemu-route-fallback qemu-dns-fallback qemu-emergency qemu-reality qemu-hysteria qemu-netem qemu-live-vps qemu-live-install
 
 lint:
 	@bash tests/lint.sh
@@ -52,7 +55,7 @@ poc-split:
 # T3a — hermetic VM smoke для движка (ucode). Деплоит движок как пакет
 # (shim + engine без tests/, ACL из реестра) и проверяет на живом OpenWrt:
 # ubus-методы, границу доверия сквозь rpcd, rootpass→session.login,
-# family on/off на реальном uci, NAT-зону + nft-цепочки + teardown на реальном fw4.
+# NAT-зону + nft-цепочки + teardown на реальном fw4.
 qemu-smoke:
 	@bash tests/qemu/smoke.sh
 
@@ -83,6 +86,28 @@ qemu-rollback:
 # Нужен интернет для apk. ~6-9 мин с KVM.
 qemu-reboot:
 	@bash tests/qemu/reboot.sh
+
+# T3i — маршрут туннеля ПЕРЕЖИВАЕТ ПЕРЕПОДКЛЮЧЕНИЕ WAN: half-routes выигрывают у WAN-дефолта,
+# не удаляя его, поэтому подъём WAN не отбирает маршрут у туннеля (инцидент «сервер жив, роутер
+# без интернета до перезагрузки»), а снятие туннеля не оставляет роутер без пути наружу.
+# Рабочий VPN-сервер НЕ нужен. Нужен интернет для apk. ~5-8 мин с KVM.
+qemu-route-fallback:
+	@bash tests/qemu/route-fallback.sh
+
+# T3j — DNS ПЕРЕЖИВАЕТ СМЕРТЬ ТУННЕЛЯ: два экземпляра DoH одного провайдера, резервный уводится
+# мимо туннеля по владельцу сокета (`ip rule uidrange`), dnsmasq спрашивает их по порядку. Без
+# этого мёртвый туннель уносил с собой ВЕСЬ резолв, включая домены из direct-списка, — то есть
+# обещание панели «открываются сайты из списка напрямую» было ложным. Есть отрицательный контроль.
+# Рабочий VPN-сервер НЕ нужен. Нужен интернет для apk. ~6-9 мин с KVM.
+qemu-dns-fallback:
+	@bash tests/qemu/dns-fallback.sh
+
+# T3k — АВАРИЙНЫЙ РЕЖИМ: одна кнопка возвращает интернет, когда туннель не поднять, и вторая
+# возвращает защиту. Проверяется и то, что защиту никто не возвращает молча (ни сторож, ни
+# переприменение при подъёме WAN) — иначе человек снова остался бы без интернета, ничего не сделав.
+# Живой VPN-сервер НЕ нужен (endpoint из RFC 5737 = «сервер умер»). ~6-9 мин с KVM.
+qemu-emergency:
+	@bash tests/qemu/emergency.sh
 
 # T3d — Full-тир (VLESS+Reality) data-plane WIRING на живом OpenWrt: singbox-шаг
 # применяет config.json + netifd-маршрут singtun0 (half-routes), connectivity-probe
