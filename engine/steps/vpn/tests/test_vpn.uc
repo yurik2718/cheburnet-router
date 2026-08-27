@@ -160,6 +160,28 @@ test("build_vpn_plan: dual-stack Address → два add_list", () => {
 	ok(has(plan.setup, "add_list network.awg0.addresses='fd00::2/128'"));
 });
 
+// ШРАМ (GL-MT3000, 2026-08-27): Amnezia-клиент 2.0 пишет диапазон, awg-tools отвергает весь конфиг.
+test("build_vpn_plan: keepalive-диапазон 25-35 → нижняя граница; мусор → дефолт", () => {
+	let rng = replace(CONF, "PersistentKeepalive = 25", "PersistentKeepalive = 25-35");
+	ok(has(build_vpn_plan(parse_awg_conf(rng), {}).setup, "set network.awg0_peer.persistent_keepalive='25'"),
+		"нижняя граница: чаще keepalive — безопасно, реже — NAT-запись протухнет");
+	let junk = replace(CONF, "PersistentKeepalive = 25", "PersistentKeepalive = often");
+	ok(has(build_vpn_plan(parse_awg_conf(junk), {}).setup, "set network.awg0_peer.persistent_keepalive='25'"),
+		"нечисло → дефолт, а не отказ netifd после установки");
+});
+
+// ШРАМ (GL-MT3000, 2026-08-27): конфиг с защитой заголовков молча не рукопожимается — kmod её не знает.
+test("build_vpn_plan: HeaderProtectionKey → план ok, но с предупреждением о причине", () => {
+	let hp = replace(CONF, "Jc = 4\n", "Jc = 4\nHeaderProtectionKey = 2GuHslRmlqkLNgYPKK4Nqt2z8uMwPKfzzy9xbnGkiFw=\n");
+	let plan = build_vpn_plan(parse_awg_conf(hp), {});
+	ok(plan.ok, "не отказываем: сервер может защиту не требовать");
+	eq(length(plan.warnings), 1);
+	ok(index(plan.warnings[0], "HeaderProtectionKey") >= 0, "причина названа по имени поля");
+	ok(!has(plan.setup, "set network.awg0.awg_headerprotectionkey='2GuHslRmlqkLNgYPKK4Nqt2z8uMwPKfzzy9xbnGkiFw='"),
+		"в uci неизвестное поле не уезжает");
+	eq(length(build_vpn_plan(parse_awg_conf(CONF), {}).warnings), 0, "обычный конфиг — без предупреждений");
+});
+
 // --- keepalive по умолчанию, если в conf нет ---
 test("build_vpn_plan: keepalive дефолт 25, если в conf отсутствует", () => {
 	let conf = "[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/32\n" +

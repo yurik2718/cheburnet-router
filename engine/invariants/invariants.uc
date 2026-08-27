@@ -8,7 +8,7 @@ import { pick_wan_fallback } from "../lib/route.uc";
 // severity: critical — дом без интернета или утечка наружу; important — деградация, которую
 // человек заметит не сразу (сломанный split, нет резервного DNS).
 // repair — машинная подсказка для watchdog'а: КЕМ чинится. null = руками.
-//   "ifup_wan" | "arm" | "reapply" | "firewall" | "doh"
+//   "ifup_wan" | "arm" | "reapply" | "firewall" | "doh". facts.tunnel_alive — живость туннеля.
 function check(id, ok, title, detail, fix, severity, repair) {
 	return { id: id, ok: ok, title: title, detail: detail, fix: ok ? null : fix,
 	         severity: severity ?? "critical", repair: ok ? null : (repair ?? null) };
@@ -208,12 +208,12 @@ function evaluate(facts) {
 
 	// Основной мёртв → весь резолв идёт резервным путём, то есть мимо туннеля. Дом работает, но
 	// приватность уже не та, что обещана в норме, — человек имеет право об этом знать.
-	// Чиним (перезапуск DoH) ТОЛЬКО когда путь наружу и туннель целы: при мёртвом туннеле демон
-	// упадёт снова (crash-loop выше), и починка била бы в стену все MAX_ATTEMPTS. Когда туннель
-	// вернулся, а procd уже исчерпал respawn, — без этой починки основной не встал бы никогда.
-	let tunnel_ok = true;
-	for (let i = 0; i < length(checks); i++)
-		if (!checks[i].ok && checks[i].severity == "critical") tunnel_ok = false;
+	// Чиним (перезапуск DoH) ТОЛЬКО при ЖИВОМ туннеле (facts.tunnel_alive — тот же признак, что у
+	// панели). ШРАМ (GL-MT3000, 2026-08-27): гейт «критичные инварианты целы» пропускал мёртвый
+	// туннель с целыми маршрутами — сторож перезапускал DoH каждые 5 минут, тот на секунду оживал,
+	// «инварианты восстановлены», и по кругу. Когда туннель вернулся, а procd исчерпал respawn, —
+	// без этой починки основной не встал бы никогда.
+	let tunnel_ok = (f.tunnel_alive === true);
 	push(checks, check("dns_main", main_i.state == "ok",
 		"основной DoH жив (резолв идёт через туннель)",
 		sprintf("порт %d: %s", ports.main ?? 5053, main_i.state),

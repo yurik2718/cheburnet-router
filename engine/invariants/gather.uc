@@ -7,7 +7,7 @@ import { sh } from "../lib/proc.uc";
 import { default_opts } from "../routing/routing.uc";
 import { chain_names } from "../steps/firewall/firewall.uc";
 import { wan_user, resolvers_for } from "../steps/doh/providers.uc";
-import { tunnel_info, tunnel_ifs, default_protocol } from "../install/install.uc";
+import { tunnel_info, tunnel_ifs, default_protocol, tunnel_health, uses_singbox } from "../install/install.uc";
 import { detect_wan } from "../lib/wan.uc";
 
 const ETC = getenv("ETC_CHEBURNET") ?? "/etc/cheburnet";
@@ -31,6 +31,16 @@ let wr = detect_wan();
 let uid_raw = trim(sh(sprintf("awk -F: '$1==\"%s\"{print $3}' /etc/passwd 2>/dev/null", wan_user())));
 let dns_uid = match(uid_raw, /^[0-9]+$/) ? int(uid_raw) : null;
 
+// Живость туннеля — тем же признаком, что у панели (tunnel_health): по нему invariants решает,
+// есть ли смысл перезапускать основной DoH (на мёртвом туннеле он упадёт снова).
+let tif = ro.tunnel_if ?? tunnel_info(protocol).tunnel_if;
+let hs = trim(sh(sprintf("awg show %s latest-handshakes 2>/dev/null | awk 'NR==1{print $2}'", tif)));
+let tunnel_alive = tunnel_health(protocol, {
+	hs_age: match(hs, /^[0-9]+$/) && int(hs) > 0 ? time() - int(hs) : null,
+	sb_running: trim(sh("pgrep sing-box >/dev/null 2>&1 && echo up")) == "up",
+	tun_up: trim(sh(sprintf("ip link show dev %s 2>/dev/null | grep -qE '[<,]UP[,>]' && echo up", tif))) == "up",
+}) == "up";
+
 let chains = chain_names(null);
 let facts = {
 	installed: installed,
@@ -39,7 +49,8 @@ let facts = {
 	paused: (saved && saved.paused === true),
 	mode: ro.mode ?? "home",
 	protocol: protocol,
-	tunnel_if: ro.tunnel_if ?? tunnel_info(protocol).tunnel_if,
+	tunnel_if: tif,
+	tunnel_alive: tunnel_alive,
 	tunnel_ifs: tunnel_ifs(),
 	wan_if: wr ? wr.wan_if : null,
 	table: table,

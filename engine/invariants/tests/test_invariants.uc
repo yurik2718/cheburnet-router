@@ -29,7 +29,7 @@ const PS_OK = " 5392 nobody    2624 S    /usr/sbin/https-dns-proxy -r https://dn
 function facts(over) {
 	let f = {
 		installed: true, mode: "home", tunnel_if: "awg0", tunnel_ifs: [ "awg0", "singtun0" ],
-		wan_if: "br-lan", ip_rule: RULE_OK, route_default: DEFAULT_OK, route_main: MAIN_OK,
+		wan_if: "br-lan", tunnel_alive: true, ip_rule: RULE_OK, route_default: DEFAULT_OK, route_main: MAIN_OK,
 		route_direct: DIRECT_OK,
 		nft_ks: KS_OK, nft_mark: MARK_OK, hdp_ps: PS_OK,
 		dns_uid: 101, dns_url: "https://dns.adguard-dns.com/dns-query",
@@ -166,10 +166,13 @@ test("основной DoH умер при ЖИВОМ туннеле → про�
 
 test("основной DoH умер при МЁРТВОМ туннеле → dns_main без починки (перезапуск бил бы в стену)", () => {
 	let ps = " 2 network 1 S /usr/sbin/https-dns-proxy -r https://dns.adguard-dns.com/dns-query -p 5054";
-	let rep = evaluate(facts({ hdp_ps: ps, route_main: DEFAULT_OK }));
-	ok(index(failed_ids(rep), "tunnel_route") >= 0, "half-routes нет — туннель снят");
+	// Маршруты ЦЕЛЫ, а рукопожатия нет (сервер мёртв) — ровно так сторож зацикливался на GL-MT3000.
+	let rep = evaluate(facts({ hdp_ps: ps, tunnel_alive: false }));
 	ok(index(failed_ids(rep), "dns_main") >= 0);
-	deep_eq(repairs(rep), [ "arm" ], "чиним туннель; DoH на молчащих bootstrap-серверах упадёт снова");
+	deep_eq(repairs(rep), [], "чинить нечем: сторож скажет один раз и замолчит");
+	let rep2 = evaluate(facts({ hdp_ps: ps, route_main: DEFAULT_OK, tunnel_alive: false }));
+	deep_eq(repairs(rep2), [ "arm" ], "снят маршрут — чиним маршрут, не DoH");
+	deep_eq(repairs(evaluate(facts({ hdp_ps: ps, tunnel_alive: null }))), [], "факт живости не собран → не гадаем, не чиним");
 });
 
 test("резервный DoH умер → провал dns_fallback с починкой (это чинится)", () => {

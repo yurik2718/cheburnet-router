@@ -87,6 +87,8 @@ if (!plan.ok) {
 		warn("vpn: " + plan.errors[i] + "\n");
 	exit(1);
 }
+for (let i = 0; i < length(plan.warnings ?? []); i++)
+	warn("vpn: ВНИМАНИЕ — " + plan.warnings[i] + "\n");
 
 if (dry) {
 	for (let i = 0; i < length(plan.teardown); i++) print("  " + plan.teardown[i] + "\n");

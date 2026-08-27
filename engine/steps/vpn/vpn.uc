@@ -97,6 +97,14 @@ function build_arm_ops(opts) {
 	return { teardown: d.teardown, setup: setup };
 }
 
+// keepalive_seconds(raw, fallback) → секунды строкой. ШРАМ (GL-MT3000, 2026-08-27): клиент Amnezia 2.0
+// пишет `PersistentKeepalive = 25-35` (диапазон), awg-tools его отвергает целиком («neither 0/off nor
+// 1-65535») — интерфейс не конфигурируется, handshake невозможен. Берём нижнюю границу: чаще — безопасно.
+function keepalive_seconds(raw, fallback) {
+	let m = match(trim(raw ?? ""), /^([0-9]+)(-[0-9]+)?$/);
+	return (m && int(m[1]) >= 0 && int(m[1]) <= 65535) ? m[1] : fallback;
+}
+
 // valid_port(host, port) → {host, port} или null: порт 1..65535 (вход пользователя; "99999"
 // проходил бы regex и валил netifd только при поднятии интерфейса).
 function valid_port(host, port) {
@@ -150,7 +158,13 @@ function parse_awg_conf(text) {
 	return { interface: iface, peers: peers };
 }
 
-// build_vpn_plan(parsed, opts) → { ok, errors, teardown, setup, interface, peer_section }.
+// Поля .conf, которые kmod-amneziawg/awg-tools на OpenWrt НЕ понимают и которые меняют формат
+// пакетов на проводе: сервер с ними ждёт другой протокол, и handshake молча не приходит
+// (GL-MT3000, 2026-08-27: конфиг Amnezia-клиента с HeaderProtectionKey — 105 пакетов ушло, 0 вернулось).
+// Не отказываем (сервер может не требовать), но называем причину заранее — в лог установки.
+const UNSUPPORTED_WIRE = [ "HeaderProtectionKey" ];
+
+// build_vpn_plan(parsed, opts) → { ok, errors, warnings, teardown, setup, interface, peer_section }.
 // teardown — delete-before-add (идемпотентность; на apply с || true). setup — uci set/add_list.
 // Берём первый [Peer] (типовой случай: один сервер). Маршрутизацию навязываем ядру (см. инвариант).
 function build_vpn_plan(parsed, opts) {
@@ -170,7 +184,13 @@ function build_vpn_plan(parsed, opts) {
 	else if (!ep)          push(errors, sprintf("не разобран Endpoint: %s", peer.Endpoint));
 
 	if (length(errors) > 0)
-		return { ok: false, errors: errors, teardown: [], setup: [] };
+		return { ok: false, errors: errors, warnings: [], teardown: [], setup: [] };
+
+	let warnings = [];
+	for (let i = 0; i < length(UNSUPPORTED_WIRE); i++)
+		if (exists(iface, UNSUPPORTED_WIRE[i]))
+			push(warnings, sprintf("%s: защита заголовков AmneziaWG на этом роутере не поддерживается — "
+				+ "если сервер её требует, рукопожатия не будет; попросите конфиг без неё", UNSUPPORTED_WIRE[i]));
 
 	let arm = build_arm_ops(o);
 	let teardown = [
@@ -212,7 +232,7 @@ function build_vpn_plan(parsed, opts) {
 	push(setup, sprintf("set network.%s.endpoint_host='%s'", peersect, ep.host));
 	push(setup, sprintf("set network.%s.endpoint_port='%s'", peersect, ep.port));
 	push(setup, sprintf("set network.%s.persistent_keepalive='%s'",
-		peersect, peer.PersistentKeepalive ?? o.keepalive));
+		peersect, keepalive_seconds(peer.PersistentKeepalive, o.keepalive)));
 	// Вооружение = наличие half-routes (см. HALF_ROUTES): туннель — дефолт для всего, что не
 	// помечено direct, а direct уходит мимо через mark→table-100 (routing/firewall) — разные
 	// таблицы, конфликта нет. fail-safe: промах direct-списка = трафик в туннель, а не мимо
@@ -225,7 +245,7 @@ function build_vpn_plan(parsed, opts) {
 		push(setup, no_proto_route_op(ifname));
 
 	return {
-		ok: true, errors: [],
+		ok: true, errors: [], warnings: warnings,
 		teardown: teardown, setup: setup,
 		interface: ifname, peer_section: peersect,
 	};
