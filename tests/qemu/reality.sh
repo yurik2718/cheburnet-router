@@ -197,6 +197,34 @@ done
 vm_ssh "ip rule show | grep -q 'fwmark 0x1 lookup 100'" \
     || { echo "  ✗ правило направления не вернулось в home"; vm_ssh "ip rule show"; exit 1; }
 echo "  ✓ set_mode travel/home: зона vpn и хук остались на singtun0, правила home на месте"
+
+# ─── 1d. Сторож поднимает мёртвый sing-box ────────────────────────────────────
+# Half-routes Full-тира живут на TUN, а TUN — на живом процессе. Упал sing-box (OOM, исчерпанный
+# respawn) — маршрут исчез, kill-switch запер дом. Раньше «arm» сторожа делал `ifup` в пустоту
+# три раза и замолкал, а кнопка «Туннель» в панели дёргала awg0 — путь оставался один: SSH.
+echo "→ сторож: sing-box остановлен (как после OOM) → тик поднимает сервис и возвращает маршрут"
+vm_ssh "/etc/init.d/sing-box stop >/dev/null 2>&1; sleep 3"
+vm_ssh "! pgrep sing-box >/dev/null 2>&1" || { echo "  ✗ sing-box не остановился — сцена не собрана"; exit 1; }
+vm_ssh "! ip route show | grep -q '0.0.0.0/1 dev singtun0'" \
+    || { echo "  ✗ half-routes остались при мёртвом TUN — сцена не собрана"; vm_ssh "ip route show"; exit 1; }
+# Сторож намеренно молчит первые 180 с после загрузки — ждём конец окна, а не подгоняем продукт.
+for _ in $(seq 1 40); do
+    UP="$(vm_ssh 'cut -d. -f1 /proc/uptime')"
+    [ "$UP" -ge 185 ] && break
+    sleep 5
+done
+vm_ssh "ucode -R $ENG/watchdog/tick.uc" || { echo "  ✗ тик сторожа завершился ошибкой"; exit 1; }
+restored=0
+for _ in $(seq 1 10); do
+    if vm_ssh "pgrep sing-box >/dev/null 2>&1 && ip route show | grep -q '0.0.0.0/1 dev singtun0' && ip route show | grep -q '128.0.0.0/1 dev singtun0'"; then
+        restored=1; break
+    fi
+    sleep 2
+done
+[ "$restored" = "1" ] || { echo "  ✗ сторож не вернул туннель: sing-box/half-routes"; vm_ssh "pgrep -l sing-box; ip route show; logread | grep -E 'watchdog|sing-box' | tail -10"; exit 1; }
+vm_ssh "logread | grep -q 'cheburnet-watchdog.*чиню (arm)'" \
+    || { echo "  ✗ сторож починил молча — в поддержке это неотличимо от «ничего не было»"; vm_ssh "logread | grep watchdog | tail -5"; exit 1; }
+echo "  ✓ sing-box перезапущен сторожем, half-routes вернулись, в журнале строка о починке"
 # Возвращаем VM как было: firewall-шаг снят, dnsmasq без noresolv (DNS-шаг set_mode его ставил).
 vm_ssh "echo '{\"domains\":[],\"routing_opts\":{\"wan_if\":\"$WAN_DEV\"}}' | ucode -R $ENG/steps/firewall/apply.uc --teardown" >/dev/null
 vm_ssh "uci -q delete dhcp.@dnsmasq[0].noresolv; uci -q delete dhcp.cheburnet_dns4; uci -q delete dhcp.cheburnet_dns6; uci commit dhcp; /etc/init.d/dnsmasq reload >/dev/null 2>&1; rm -f /etc/cheburnet/install.json"
