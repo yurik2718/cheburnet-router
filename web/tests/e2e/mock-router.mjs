@@ -10,7 +10,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, extname, resolve } from 'node:path';
 
-const PORT = 4317;
+// E2E_PORT — обход: в WSL mirrored-режиме Windows/Hyper-V иногда резервирует диапазон с 4317.
+const PORT = Number(process.env.E2E_PORT ?? 4317);
 const WEB_ROOT = resolve(import.meta.dirname, '../../../package/cheburnet/files/web');
 const TOKEN = 'TESTTOKEN';
 
@@ -59,6 +60,8 @@ let forced = [];
 // Чего не хватает для Full-тира (status.full_missing): сценарий может задать явно, чтобы
 // проверить адресность подсказки («не хватает места» ≠ «слабый процессор»).
 let fullMissing = null;
+// Свой список сайтов напрямую — движок хранит его между вызовами, панель читает его после входа.
+let userDomains = ['example.com'];
 
 const ADMIN_METHODS = new Set([
   'set_mode', 'update_list', 'service_restart', 'set_dns_provider',
@@ -68,6 +71,9 @@ const ADMIN_METHODS = new Set([
   'diagnostics',
   // install_token — тем более admin: токен и есть признак «это владелец» на пути установки.
   'install_token',
+  // Свой список — admin в обе стороны (rpcd-acl.json: get_domains в read, set_domains в write):
+  // он говорит о привычках дома, поэтому не отдаётся без сессии.
+  'get_domains', 'set_domains',
 ]);
 
 const PROVIDERS = [
@@ -97,7 +103,7 @@ function ubusReply(method, args, session) {
         forced,
         ...((installed || vpnDown) && {
           installed: true,
-          mode: 'home', direct_domains: 1, direct_list_loaded: true, imported_domains: 0,
+          mode: 'home', direct_domains: userDomains.length, direct_list_loaded: true, imported_domains: 0,
           // Здоровье туннеля движок отдаёт ОДНИМ полем для любого протокола. Раньше мок возвращал
           // handshake=12 и при protocol=reality — врал в пользу зелёного и скрыл реальный баг
           // (панель судила о Reality по AWG-рукопожатию и показывала «VPN не работает»).
@@ -137,6 +143,16 @@ function ubusReply(method, args, session) {
     // Свежий токен после сброса: движок выпускает его в reset.uc, панель ведёт им в мастер.
     case 'install_token':
       return [0, { status: 'ok', token: TOKEN }];
+    // Свой список сайтов напрямую. Движок отбраковывает строки, не похожие на домен, и возвращает
+    // их отдельно — панель обязана назвать пропущенное, а не молча сохранить остаток.
+    case 'get_domains':
+      return [0, { user_domains: userDomains }];
+    case 'set_domains': {
+      const given = args.domains ?? [];
+      const rejected = given.filter((d) => !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9-]+)*$/i.test(d));
+      userDomains = given.filter((d) => !rejected.includes(d));
+      return [0, { user_domains: userDomains.length, direct_domains: userDomains.length, rejected }];
+    }
     case 'check_lan_conflict':
       return [0, { conflict: false }];
     case 'preflight':
@@ -242,6 +258,7 @@ createServer(async (req, res) => {
     hw = 'ok';
     forced = [];
     fullMissing = null;
+    userDomains = ['example.com'];
     res.end('ok');
     return;
   }

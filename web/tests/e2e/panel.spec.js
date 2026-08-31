@@ -185,8 +185,8 @@ test('панель: при protocol=hysteria2 замена зовёт replace_hy
 test('панель: результат действия печатается рядом с кнопкой, а не в конце страницы', async ({ page, request }) => {
   await openPanel(page, request, {});
 
-  await page.getByRole('button', { name: 'Обновить список сайтов' }).click();
-  const note = page.locator('.row:has-text("Обновить список сайтов") + p');
+  await page.getByRole('button', { name: 'Обновить готовый список' }).click();
+  const note = page.locator('.row:has-text("Обновить готовый список") + p');
   await expect(note).toHaveText(/Список обновлён/);
 
   // И оно НЕ уехало в опасную зону: там своё сообщение (о сбросе), чужих быть не должно.
@@ -268,10 +268,10 @@ test('панель: admin-метод без сессии → модалка вх
   await openPanel(page, request, { adminLocked: true });
 
   // Действие отбито PERMISSION_DENIED → вместо голой ошибки открывается вход.
-  await page.getByRole('button', { name: 'Обновить список сайтов' }).click();
+  await page.getByRole('button', { name: 'Обновить готовый список' }).click();
   await expect(page.getByRole('heading', { name: 'Вход в управление' })).toBeVisible();
 
-  // Кнопок «Войти» на странице две (linklike под панелью и в модалке) — скоупим модалкой.
+  // Кнопок «Войти» на странице две (блок входа под «Управлением» и в модалке) — скоупим модалкой.
   const modal = page.locator('.modal');
 
   // Неверный пароль — понятный счётчик попыток. Поле при этом НЕ блокируется: опечатка не должна
@@ -287,6 +287,44 @@ test('панель: admin-метод без сессии → модалка вх
   await expect(page.getByText('Вход выполнен — повторите действие.')).toBeVisible();
   // Конкретика от самого действия сохраняется (сколько доменов подтянулось), а не заменяется
   // безликим «готово» — admin() ставит дефолтный текст только если действие своего не дало.
-  await page.getByRole('button', { name: 'Обновить список сайтов' }).click();
+  await page.getByRole('button', { name: 'Обновить готовый список' }).click();
   await expect(page.getByText('Список обновлён:', { exact: false })).toBeVisible();
+});
+
+// Вход — узкое место панели: пока он был подчёркнутым словом в абзаце, до настроек не доходили
+// («панель только смотреть»). Тест держит оба решения: заметный блок и главная кнопка списка,
+// которая ведёт КО ВХОДУ, а не стоит серой рядом с активной (серая читается как «сломано»).
+test('панель: без сессии — блок входа, «Сохранить список» ведёт ко входу, после входа список правится', async ({ page, request }) => {
+  await openPanel(page, request, { adminLocked: true });
+
+  const gate = page.locator('.login-gate');
+  await expect(gate).toBeVisible();
+  await expect(gate.getByRole('button', { name: 'Войти' })).toBeVisible();
+
+  // Само поле списка без сессии закрыто и объясняет почему: движок не отдаёт список без входа.
+  const domains = page.locator('label.domains textarea');
+  await expect(domains).toBeDisabled();
+  await expect(domains).toHaveAttribute('placeholder', /Войдите/);
+
+  const save = page.getByRole('button', { name: 'Сохранить список' });
+  await expect(save).toBeEnabled();
+  await save.click();
+
+  const modal = page.locator('.modal');
+  await expect(modal.getByRole('heading', { name: 'Вход в управление' })).toBeVisible();
+  // Курсор сразу в поле пароля: модалку открыл клик, лишний тап по полю на телефоне не нужен.
+  await expect(modal.getByLabel('Пароль')).toBeFocused();
+
+  await modal.getByLabel('Пароль').fill('panel-pass-1');
+  await modal.getByRole('button', { name: 'Войти' }).click();
+
+  // Вход закрывает блок и сразу подтягивает список (get_domains) — без второго клика.
+  await expect(gate).toHaveCount(0);
+  await expect(domains).toHaveValue('example.com');
+
+  // Круг замыкается: правка сохраняется, а строка, не похожая на домен, названа, а не проглочена.
+  await domains.fill('example.com\nexample.org\n!!!');
+  await save.click();
+  await expect(page.getByText('Сохранено: своих сайтов 2', { exact: false })).toBeVisible();
+  await expect(page.getByText('пропущены: !!!', { exact: false })).toBeVisible();
 });

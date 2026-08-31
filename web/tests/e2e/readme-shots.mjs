@@ -7,6 +7,8 @@ import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const OUT = process.argv[2] || '/tmp/readme-shots';
+// E2E_PORT — как в mock-router.mjs (в WSL mirrored-режиме 4317 бывает занят со стороны Windows).
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT ?? 4317}`;
 const AWG_CONF = `[Interface]
 PrivateKey = 0000000000000000000000000000000000000000000=
 Address = 10.8.1.7/32
@@ -28,8 +30,8 @@ try {
   const page = await browser.newPage({ viewport: { width: 760, height: 900 } });
   // Железо, которое тянет Full-тир: на скриншоте видно все три туннеля живыми. На слабом мок
   // запирает два из трёх, и README показывал бы две недоступные строки вместо главной ценности.
-  await page.request.post('http://127.0.0.1:4317/__set', { data: { hw: 'full' } });
-  await page.goto('http://127.0.0.1:4317/cheburnet/?token=TESTTOKEN');
+  await page.request.post(`${BASE}/__set`, { data: { hw: 'full' } });
+  await page.goto(`${BASE}/cheburnet/?token=TESTTOKEN`);
   await page.getByText('все 6 проверок пройдены').waitFor();
   await page.getByRole('button', { name: 'Продолжить' }).click();
 
