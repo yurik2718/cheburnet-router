@@ -1,9 +1,10 @@
 <script>
   // type: 'text' | 'password' | 'number' — как у нативного input, стили общие.
-  let { value = $bindable(''), type = 'text', ...rest } = $props();
+  // el — сам DOM-узел наружу (bind:el): нужен там, где вызывающему надо .focus().
+  let { value = $bindable(''), type = 'text', el = $bindable(null), ...rest } = $props();
 </script>
 
-<input {type} bind:value {...rest} />
+<input bind:this={el} {type} bind:value {...rest} />
 
 <style>
   input {

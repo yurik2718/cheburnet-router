@@ -332,6 +332,24 @@ button.danger.wide { display: block; width: 100%; margin-top: 0.75rem; padding: 
 button.danger.wide:not(:disabled) { background: var(--bad); color: var(--bad-fg); }
 h3.danger-h { color: var(--bad); }
 
+/* Вход в управление: блок с primary-кнопкой во всю строку на узком экране. Не ссылка в абзаце —
+   её не находили. Рамка и фон — как у .note (это приглашение, не тревога). */
+.login-gate {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 0.8rem 1rem;
+  margin: 0.5rem 0 1rem;
+}
+.login-gate p { margin: 0; flex: 1 1 16rem; font-size: 0.95rem; }
+/* .ui-btn в селекторе обязателен: у scoped-стиля Button.svelte специфичность выше, чем у
+   `.login-gate button`, и размер кнопки молча остался бы дефолтным. */
+.login-gate button.ui-btn { flex: 1 0 9rem; padding: 0.75rem 1.4rem; font-size: 1rem; }
+
 button.linklike {
   background: none;
   border: none;

@@ -71,6 +71,10 @@
   let loginPass = $state('');
   let loginError = $state('');
   let loginAttempts = $state(0);
+  let loginInput = $state(null);
+  // Квирк браузеров: атрибут autofocus не срабатывает на узле, вставленном ПОСЛЕ загрузки
+  // страницы, — модалку открывает клик, поэтому фокус ставим сами (закреплено e2e).
+  $effect(() => { if (loginOpen) loginInput?.focus(); });
 
   async function refresh() {
     try {
@@ -612,7 +616,7 @@
            Нейтральная подсказка, не красная тревога. -->
       <p class="note">
         Ваши сайты напрямую работают ({s.direct_domains}). Можно дополнительно подтянуть готовый
-        список популярных — кнопка «Обновить список сайтов» ниже.
+        список популярных — кнопка «Обновить готовый список» ниже.
       </p>
     {/if}
 
@@ -659,10 +663,13 @@
     {#if loggedIn}
       <p class="muted small">Вы вошли как root. <button class="linklike" onclick={doLogout}>Выйти</button></p>
     {:else}
-      <p class="muted small">
-        Управляющие действия ниже требуют входа.
-        <button class="linklike" onclick={() => (loginOpen = true)}>Войти</button>
-      </p>
+      <!-- Вход — заметный блок с кнопкой, а не подчёркнутое слово в абзаце: новичок ссылку не
+           замечал и решал, что панель «только смотреть». -->
+      <div class="login-gate" id="login">
+        <p><strong>Настройки ниже защищены паролем.</strong> Войдите, чтобы их менять —
+          пароль роутера тот, что задали при установке.</p>
+        <Button variant="primary" onclick={() => (loginOpen = true)}>Войти</Button>
+      </div>
     {/if}
     <!-- Сегмент, а не кнопка-переключатель: кнопка показывала, КУДА переключит, а строка сводки
          рядом — где сейчас. Одни и те же два слова в двух местах с противоположным смыслом. -->
@@ -690,7 +697,10 @@
          вставленный между ними текст отодвигал бы его от того, что человек только что нажал. -->
     <p class="muted small action-hint">«Обновить готовый список» подтягивает community-список популярных сайтов — он добавляется к вашему.</p>
     <div class="row">
-      <Button disabled={busy || !loggedIn || !domainsLoaded} onclick={saveDomains}>Сохранить список</Button>
+      <!-- Без входа кнопка не серая, а ведёт ко входу: серая кнопка рядом с активной читается как
+           «сломано», а не как «нужен пароль». -->
+      <Button disabled={busy || (loggedIn && !domainsLoaded)}
+              onclick={() => (loggedIn ? saveDomains() : (loginOpen = true))}>Сохранить список</Button>
       <Button disabled={busy} onclick={updateList}>Обновить готовый список</Button>
     </div>
     {@render actionNote('manage')}
@@ -943,6 +953,7 @@
           <span>Пароль</span>
           <Input
             type="password"
+            bind:el={loginInput}
             bind:value={loginPass}
             autocomplete="current-password"
             onkeydown={(e) => e.key === 'Enter' && doLogin()}
